@@ -17,10 +17,9 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
-        print(queryset)
         serializer = self.get_serializer(queryset, many=True, context={'request': request})
 
-        return Response(serializer.data)
+        return Response(serializer.data)    
 
 
 class EnrollmentViewSet(APIView):
