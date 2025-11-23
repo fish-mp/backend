@@ -1,23 +1,17 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from django.contrib.auth.models import User, Group
+from django.contrib.auth.models import Group
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 
 from users.models import CustomUser
-
-
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 from unfold.admin import ModelAdmin
 
-
-
 admin.site.unregister(Group)
-
 
 @admin.register(Group)
 class GroupAdmin(BaseGroupAdmin, ModelAdmin):
     pass
-
 
 class CustomUserAdmin(UserAdmin, ModelAdmin):
     list_display = (
@@ -30,7 +24,7 @@ class CustomUserAdmin(UserAdmin, ModelAdmin):
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
         ('Персональная информация', {'fields': ('first_name', 'city', 'age')}),
-        ('Права', {'fields': ('is_active', 'is_staff', 'is_superuser')}),
+        ('Права', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups')}),
     )
     
     add_fieldsets = (
@@ -39,6 +33,7 @@ class CustomUserAdmin(UserAdmin, ModelAdmin):
             'fields': ('email', 'password1', 'password2', 'first_name', 'city', 'age'),
         }),
     )
+    filter_horizontal = ('groups',)
     
     ordering = ('email',)
     search_fields = ('email', 'first_name', 'city')
