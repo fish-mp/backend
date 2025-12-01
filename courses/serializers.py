@@ -16,7 +16,7 @@ class TagSerializer(ModelSerializer):
 class CourseSerializer(ModelSerializer):
     files = SerializerMethodField('get_files')
     tag = TagSerializer(many=False)
-    enrollment_state = serializers.SerializerMethodField()
+    enrollment_state = serializers.SerializerMethodField('get_enrollment_state')
 
     class Meta:
         model = Course
