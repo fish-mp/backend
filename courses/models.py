@@ -48,6 +48,7 @@ class Enrollment(models.Model):
     state = models.CharField(max_length=100, choices=state_choices, default='applied')
     course = models.ForeignKey(Course, on_delete=models.CASCADE)
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name_plural = 'Заявки'

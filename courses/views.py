@@ -1,17 +1,15 @@
-from django.http import HttpResponse
-from django.shortcuts import render
-from rest_framework import viewsets
-from rest_framework.response import Response
+# courses/views.py
 from rest_framework.views import APIView
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-
+from django.shortcuts import get_object_or_404
 
 from courses.models import Course, Enrollment
-from courses.serializers import CourseSerializer, UserEnrollmentSerializer, EnrollmentCourseSerializer
-from rest_framework import generics
+from courses.serializers import CourseSerializer, UserEnrollmentSerializer
 
 
-# Create your views here.
 class CourseViewSet(viewsets.ModelViewSet):
     serializer_class = CourseSerializer
     queryset = Course.objects.all()
@@ -19,71 +17,49 @@ class CourseViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True, context={'request': request})
-
-        return Response(serializer.data)    
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    def my(self, request):
+        """
+        Получить курсы текущего пользователя
+        """
+        # Получаем все enrollment текущего пользователя
+        enrollments = Enrollment.objects.filter(user=request.user)
+        
+        # Сериализуем данные
+        serializer = UserEnrollmentSerializer(
+            enrollments, 
+            many=True,
+            context={'request': request}  # Передаем request в контекст
+        )
+        return Response(serializer.data)
+    
+    # Удалите старый MyCoursesView или оставьте для других целей
 
 
 class EnrollmentViewSet(APIView):
+    permission_classes = [IsAuthenticated]  
 
     def post(self, request, *args, **kwargs):
         user = request.user
         course_id = self.kwargs['pk']
+        
         if course_id is None:
             return Response("Invalid JSON", status=400)
+        
         try:
             course = Course.objects.get(pk=course_id)
         except Course.DoesNotExist:
             return Response("Course not Found", status=404)
+        
         try:
+            # Проверяем, не подписан ли уже пользователь
+            existing_enrollment = Enrollment.objects.filter(user=user, course=course).first()
+            if existing_enrollment:
+                return Response({"result": "Already enrolled", "state": existing_enrollment.state})
+            
             Enrollment.objects.create(user=user, course=course)
             return Response({"result": "Applied"})
-        except Exception:
-            return Response("Server Exception")
-
-class MyCoursesView(APIView):
-    """View для получения курсов, на которые подписан пользователь"""
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request, *args, **kwargs):
-        # Получаем все enrollment текущего пользователя
-        enrollments = Enrollment.objects.filter(user=request.user)
-        
-        # Можно вернуть два варианта:
-        # Вариант 1: Вернуть список enrollment с деталями курсов
-        serializer = UserEnrollmentSerializer(enrollments, many=True)
-        return Response(serializer.data)
-        
-        # Или Вариант 2: Вернуть просто список курсов
-        # courses = [enrollment.course for enrollment in enrollments]
-        # serializer = CourseSerializer(courses, many=True, context={'request': request})
-        # return Response(serializer.data)
-
-
-class MyEnrolledCoursesView(generics.ListAPIView):
-    """View для получения курсов пользователя с использованием generics"""
-    serializer_class = CourseSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        # Получаем курсы, на которые подписан пользователь
-        user_enrollments = Enrollment.objects.filter(user=self.request.user)
-        course_ids = user_enrollments.values_list('course_id', flat=True)
-        return Course.objects.filter(id__in=course_ids)
-    
-    def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True, context={'request': request})
-        
-        # Добавляем информацию о состоянии enrollment
-        data = serializer.data
-        for course_data in data:
-            enrollment = Enrollment.objects.filter(
-                user=request.user, 
-                course_id=course_data['id']
-            ).first()
-            if enrollment:
-                course_data['enrollment_state'] = enrollment.state
-            else:
-                course_data['enrollment_state'] = None
-        
-        return Response(data)
+        except Exception as e:
+            return Response(f"Server Exception: {str(e)}", status=500)

@@ -33,7 +33,7 @@ schema_view = get_schema_view(
       contact=openapi.Contact(email="contact@snippets.local"),
       license=openapi.License(name="BSD License"),
    ),
-    url="https://fish-mp.miv-dev.ru/",
+    url="http://127.0.0.1:8000/",
    public=True,
    permission_classes=(permissions.AllowAny,),
 )
