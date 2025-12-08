@@ -36,3 +36,26 @@ class CourseSerializer(ModelSerializer):
             return enrollment.state
         except Enrollment.DoesNotExist:
             return None
+
+class EnrollmentCourseSerializer(ModelSerializer):
+    """Сериализатор для курсов через Enrollment"""
+    enrollment_state = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Course
+        fields = '__all__'
+    
+    def get_enrollment_state(self, obj):
+        # Для запросов списка курсов через enrollment
+        # enrollment передается через context
+        if 'enrollment' in self.context:
+            return self.context['enrollment'].state
+        return None
+
+class UserEnrollmentSerializer(ModelSerializer):
+    """Сериализатор для Enrollment с деталями курса"""
+    course = CourseSerializer(read_only=True)
+    
+    class Meta:
+        model = Enrollment
+        fields = ['id', 'course', 'state', 'created_at']
