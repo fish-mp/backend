@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'events.apps.EventsConfig',
     'news.apps.NewsConfig',
     'courses.apps.CoursesConfig',
+    "shop.apps.ShopConfig",
     # Plugins
     "rest_framework",
     "rest_framework_simplejwt",
