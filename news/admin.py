@@ -7,12 +7,14 @@ class NewsPhotoInline(TabularInline):
     model = NewsPhoto
     extra = 1
     readonly_fields = ['photo_preview']
+    fields = ('image', 'description', 'created_at', 'photo_preview')
     
     def photo_preview(self, obj):
         if obj.image:
             return format_html('<img src="{}" style="max-height: 100px;"/>', obj.image.url)
         return "Нет изображения"
     photo_preview.short_description = "Предпросмотр"
+
 
 @admin.register(News)
 class NewsAdmin(ModelAdmin):
@@ -24,9 +26,13 @@ class NewsAdmin(ModelAdmin):
         ('Основная информация', {
             'fields': ('title', 'text')
         }),
+        ('Настройки публикации', {
+            'fields': ('created_at', 'updated_at')
+        }),
     )
     
     inlines = [NewsPhotoInline]
+
 
 @admin.register(NewsPhoto)
 class NewsPhotoAdmin(ModelAdmin):
