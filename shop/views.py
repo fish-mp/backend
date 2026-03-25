@@ -4,11 +4,11 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
 from shop.models import (
-    Brand, Category, Product, Collection, 
+    Brand, Category, Color, Product, Collection, 
     Review, Favorite, Cart, CartItem, Order, OrderItem
 )
 from shop.serializers import (
-    BrandSerializer, CategorySerializer, ProductListSerializer, ProductDetailSerializer,
+    BrandSerializer, CategorySerializer, ColorSerializer, ProductListSerializer, ProductDetailSerializer,
     CollectionSerializer, ReviewSerializer, FavoriteSerializer,
     CartSerializer, CartItemSerializer, OrderSerializer
 )
@@ -27,14 +27,18 @@ class BrandViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Brand.objects.all()
     serializer_class = BrandSerializer
 
+class ColorViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Color.objects.all()
+    serializer_class = ColorSerializer
+
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
 
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Product.objects.select_related('brand', 'category').prefetch_related('images').all()
+    queryset = Product.objects.select_related('brand', 'category', 'color').prefetch_related('images').all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['category', 'brand', 'is_in_stock', 'is_available', 'collections']
+    filterset_fields = ['category', 'brand', 'color', 'is_in_stock', 'is_available', 'collections']
     
     search_fields = ['name', 'description', 'sku']
     ordering_fields = ['price', 'created_at', 'name']

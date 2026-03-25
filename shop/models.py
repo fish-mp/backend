@@ -32,6 +32,17 @@ class Category(models.Model):
         if self.parent:
             return f"{self.parent.name} -> {self.name}"
         return self.name
+    
+class Color(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=50, blank=True, verbose_name="Название цвета")
+
+    class Meta:
+        verbose_name = "Цвет товара"
+        verbose_name_plural = "Цвета товаров"
+
+    def __str__(self):
+        return self.name
 
 class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -49,7 +60,7 @@ class Product(models.Model):
     is_available = models.BooleanField(default=True, verbose_name="Доступен для заказа (Активен)")
     
     weight = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name="Вес (кг)")
-    color = models.CharField(max_length=50, blank=True, verbose_name="Цвет")
+    color = models.ForeignKey(Color, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Цвет")
     length = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name="Длина (см)")
     width = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name="Ширина (см)")
     height = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True, verbose_name="Высота (см)")

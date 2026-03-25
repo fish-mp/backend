@@ -2,7 +2,7 @@ from django.contrib import admin
 from unfold.admin import ModelAdmin, TabularInline
 
 from .models import (
-    Category, Brand, Product, ProductImage, 
+    Category, Brand, Color, Product, ProductImage, 
     Collection, Review, Order, OrderItem,
     Cart, CartItem, Favorite 
 )
@@ -50,6 +50,11 @@ class CategoryAdmin(ModelAdmin):
 @admin.register(Brand)
 class BrandAdmin(ModelAdmin):
     list_display = ('name', 'website')
+    search_fields = ('name',)
+
+@admin.register(Color)
+class ColorAdmin(ModelAdmin):
+    list_display = ('name',)
     search_fields = ('name',)
 
 @admin.register(Collection)

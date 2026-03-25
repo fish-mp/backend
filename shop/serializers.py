@@ -1,12 +1,17 @@
 from rest_framework import serializers
 from .models import (
     Brand, Category, Product, ProductImage, Collection, 
-    Review, Favorite, Cart, CartItem, Order, OrderItem
+    Review, Favorite, Cart, CartItem, Order, OrderItem, Color
 )
 
 class BrandSerializer(serializers.ModelSerializer):
     class Meta:
         model = Brand
+        fields = '__all__'
+
+class ColorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Color
         fields = '__all__'
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -50,6 +55,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
     Полный сериалайзер для карточки товара
     """
     brand = BrandSerializer(read_only=True)
+    color = ColorSerializer(read_only=True)
     category = CategorySerializer(read_only=True)
     images = ProductImageSerializer(many=True, read_only=True)
     average_rating = serializers.ReadOnlyField()
