@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
+from .filters import ProductFilter
 from shop.models import (
     Brand, Category, Color, Product, Collection, 
     Review, Favorite, Cart, CartItem, Order, OrderItem
@@ -34,11 +35,11 @@ class ColorViewSet(viewsets.ReadOnlyModelViewSet):
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-
+    
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Product.objects.select_related('brand', 'category', 'color').prefetch_related('images').all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['category', 'brand', 'color', 'is_in_stock', 'is_available', 'collections']
+    filterset_class = ProductFilter
     
     search_fields = ['name', 'description', 'sku']
     ordering_fields = ['price', 'created_at', 'name']
