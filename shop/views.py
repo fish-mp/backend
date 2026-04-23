@@ -113,40 +113,38 @@ class CartItemViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class OrderViewSet(viewsets.ModelViewSet):
-    serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+      serializer_class = OrderSerializer
+      permission_classes = [IsAuthenticated]
 
-    def get_queryset(self):
-        return Order.objects.filter(user=self.request.user)
+      def get_queryset(self):
+          return Order.objects.filter(user=self.request.user)
 
-    def create(self, request, *args, **kwargs):
-        # Логика оформления заказа:
-        # 1. Берем корзину юзера
-        # 2. Создаем заказ
-        # 3. Переносим items из CartItem в OrderItem
-        # 4. Очищаем корзину
-        
-        cart = Cart.objects.get(user=request.user)
-        if not cart.items.exists():
-            return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
+      def create(self, request, *args, **kwargs):
+          # Логика оформления заказа:
+          # 1. Берем корзину юзера
+          # 2. Создаем заказ
+          # 3. Переносим items из CartItem в OrderItem
+          # 4. Очищаем корзину
 
-        order = Order.objects.create(user=request.user, status='new')
-        total_amount = 0
+          cart = Cart.objects.get(user=request.user)
+          if not cart.items.exists():
+              return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
 
-        for item in cart.items.all():
-            OrderItem.objects.create(
-                order=order,
-                product=item.product,
-                price=item.product.price,
-                quantity=item.quantity
-            )
-            total_amount += item.product.price * item.quantity
-        
-        order.total_amount = total_amount
-        order.save()
+          cart_items = list(cart.items.select_related('product').all())
+          total_amount = sum(item.product.price * item.quantity for item in cart_items)
 
-        # Очищаем корзину
-        cart.items.all().delete()
+          order = Order.objects.create(user=request.user, status='new', total_amount=total_amount)
 
-        serializer = self.get_serializer(order)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+          for item in cart_items:
+              OrderItem.objects.create(
+                  order=order,
+                  product=item.product,
+                  price=item.product.price,
+                  quantity=item.quantity
+              )
+
+          # Очищаем корзину
+          cart.items.all().delete()
+
+          serializer = self.get_serializer(order)
+          return Response(serializer.data, status=status.HTTP_201_CREATED)
