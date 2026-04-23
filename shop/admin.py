@@ -11,10 +11,11 @@ class ProductImageInline(TabularInline):
     model = ProductImage
     extra = 1
 
-class OrderItemInline(TabularInline):
-    model = OrderItem
-    extra = 0
-    readonly_fields = ('price',)
+class OrderItemInline(TabularInline):                                                                              
+      model = OrderItem
+      extra = 0
+
+
 
 class CartItemInline(TabularInline):
     model = CartItem
