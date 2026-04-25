@@ -96,21 +96,35 @@ class CartItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        cart = Cart.objects.get(user=self.request.user)
+        cart, _ = Cart.objects.get_or_create(user=self.request.user)
         return CartItem.objects.filter(cart=cart)
 
-    def perform_create(self, serializer):
-        cart = Cart.objects.get(user=self.request.user)
-        product_id = self.request.data.get('product')
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        cart, _ = Cart.objects.get_or_create(user=request.user)
+        
+        product_id = serializer.validated_data.get('product_id')
+        quantity_to_add = serializer.validated_data.get('quantity', 1)
+        
         existing_item = CartItem.objects.filter(cart=cart, product_id=product_id).first()
         
         if existing_item:
-            existing_item.quantity += int(self.request.data.get('quantity', 1))
+            existing_item.quantity += quantity_to_add
             existing_item.save()
-            return Response(self.get_serializer(existing_item).data, status=status.HTTP_200_OK)
+            return Response(
+                self.get_serializer(existing_item).data, 
+                status=status.HTTP_200_OK
+            )
         else:
             serializer.save(cart=cart)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            headers = self.get_success_headers(serializer.data)
+            return Response(
+                serializer.data, 
+                status=status.HTTP_201_CREATED, 
+                headers=headers
+            )
 
 class OrderViewSet(viewsets.ModelViewSet):
       serializer_class = OrderSerializer
