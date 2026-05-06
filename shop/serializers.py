@@ -98,14 +98,10 @@ class FavoriteSerializer(serializers.ModelSerializer):
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
     product_id = serializers.UUIDField(write_only=True)
-    total_price = serializers.SerializerMethodField()
 
     class Meta:
         model = CartItem
         fields = ['id', 'product', 'product_id', 'quantity', 'total_price']
-
-    def get_total_price(self, obj):
-        return obj.quantity * obj.product.price
 
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)

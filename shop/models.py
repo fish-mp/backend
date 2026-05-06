@@ -166,6 +166,10 @@ class CartItem(models.Model):
     )
     quantity = models.PositiveIntegerField(default=1, verbose_name="Количество")
 
+    @property
+    def total_price(self):
+        return self.quantity * self.product.price
+
     class Meta:
         verbose_name = "Товар в корзине"
         verbose_name_plural = "Товары в корзине"
