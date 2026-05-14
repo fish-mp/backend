@@ -60,6 +60,6 @@ class EnrollmentViewSet(APIView):
                 return Response({"result": "Already enrolled", "state": existing_enrollment.state})
             
             Enrollment.objects.create(user=user, course=course)
-            return Response({"result": "Applied"})
+            return Response({"result": "Enrolled"})
         except Exception as e:
             return Response(f"Server Exception: {str(e)}", status=500)
