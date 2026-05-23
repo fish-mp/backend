@@ -180,6 +180,8 @@ class CartItem(models.Model):
 
 class Order(models.Model):
     STATUS_CHOICES = (
+        ('pending', 'Ожидает оплаты'),   # добавлено
+        ('paid', 'Оплачен'),             # добавлено
         ('new', 'Новый'),
         ('processing', 'В обработке'),
         ('shipped', 'Отправлен'),
@@ -198,6 +200,7 @@ class Order(models.Model):
         max_digits=10, decimal_places=2, 
         verbose_name="Общая сумма"
     )
+    payment_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="ID платежа в ЮKassa")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
     class Meta:

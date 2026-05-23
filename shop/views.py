@@ -13,6 +13,15 @@ from shop.serializers import (
     CollectionSerializer, ReviewSerializer, FavoriteSerializer,
     CartSerializer, CartItemSerializer, OrderSerializer
 )
+from rest_framework.views import APIView
+from yookassa import Configuration, Payment
+from django.conf import settings
+from rest_framework import status
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.http import HttpResponse, JsonResponse
+import json
+
 
 class IsOwnerOrReadOnly(IsAuthenticatedOrReadOnly):
     """
@@ -36,6 +45,23 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
     
+@method_decorator(csrf_exempt, name='dispatch')
+class YooKassaWebhookView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def post(self, request):
+        try:
+            event = json.loads(request.body)
+            if event.get('event') == 'payment.succeeded':
+                payment_id = event['object']['id']
+                # Обновляем статус заказа
+                Order.objects.filter(payment_id=payment_id, status='pending').update(status='paid')
+            return HttpResponse(status=200)
+        except Exception as e:
+            # Логируем ошибку, но возвращаем 200, чтобы ЮKassa не повторяла
+            return HttpResponse(status=200)
+        
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Product.objects.select_related('brand', 'category', 'color').prefetch_related('images').all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -127,38 +153,62 @@ class CartItemViewSet(viewsets.ModelViewSet):
             )
 
 class OrderViewSet(viewsets.ModelViewSet):
-      serializer_class = OrderSerializer
-      permission_classes = [IsAuthenticated]
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
 
-      def get_queryset(self):
-          return Order.objects.filter(user=self.request.user)
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user)
 
-      def create(self, request, *args, **kwargs):
-          # Логика оформления заказа:
-          # 1. Берем корзину юзера
-          # 2. Создаем заказ
-          # 3. Переносим items из CartItem в OrderItem
-          # 4. Очищаем корзину
+    def create(self, request, *args, **kwargs):
+        cart = Cart.objects.get(user=request.user)
+        if not cart.items.exists():
+            return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
 
-          cart = Cart.objects.get(user=request.user)
-          if not cart.items.exists():
-              return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
+        cart_items = list(cart.items.select_related('product').all())
+        total_amount = sum(item.product.price * item.quantity for item in cart_items)
 
-          cart_items = list(cart.items.select_related('product').all())
-          total_amount = sum(item.product.price * item.quantity for item in cart_items)
+        # 1. Создаём заказ со статусом "pending"
+        order = Order.objects.create(
+            user=request.user,
+            status='pending',
+            total_amount=total_amount
+        )
 
-          order = Order.objects.create(user=request.user, status='new', total_amount=total_amount)
+        # 2. Переносим товары в OrderItem
+        for item in cart_items:
+            OrderItem.objects.create(
+                order=order,
+                product=item.product,
+                price=item.product.price,
+                quantity=item.quantity
+            )
 
-          for item in cart_items:
-              OrderItem.objects.create(
-                  order=order,
-                  product=item.product,
-                  price=item.product.price,
-                  quantity=item.quantity
-              )
+        # 3. Создаём платёж в ЮKassa (конфигурация уже выполнена глобально в начале файла)
+        payment = Payment.create({
+            "amount": {
+                "value": str(total_amount),
+                "currency": "RUB"
+            },
+            "confirmation": {
+                "type": "redirect",
+                "return_url": "http://localhost:5173/order-success"
+            },
+            "capture": True,
+            "description": f"Заказ №{order.id} от {request.user.email}",
+            "metadata": {
+                "order_id": order.id
+            }
+        })
 
-          # Очищаем корзину
-          cart.items.all().delete()
+        # 4. Сохраняем payment_id в заказ
+        order.payment_id = payment.id
+        order.save()
 
-          serializer = self.get_serializer(order)
-          return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # 5. Очищаем корзину ТОЛЬКО ПОСЛЕ УСПЕШНОГО СОЗДАНИЯ ПЛАТЕЖА
+        cart.items.all().delete()
+
+        # 6. Возвращаем ссылку на оплату
+        return Response({
+            "order_id": order.id,
+            "confirmation_url": payment.confirmation.confirmation_url
+        }, status=status.HTTP_201_CREATED)

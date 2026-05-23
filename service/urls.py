@@ -21,6 +21,7 @@ from drf_yasg.views import get_schema_view
 from rest_framework import permissions
 from django.conf import settings
 from django.conf.urls.static import static
+from shop.views import YooKassaWebhookView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
 
 schema_view = get_schema_view(
@@ -49,5 +50,7 @@ urlpatterns = [
     path('api/news/', include('news.urls')),
     path('api/courses/', include('courses.urls')),
     path('api/', include('shop.urls')),
+    path('api/yookassa-webhook/', YooKassaWebhookView.as_view(), name='yookassa_webhook'),
     path('api/swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+

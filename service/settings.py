@@ -13,6 +13,8 @@ DEBUG: bool = config("DEBUG", default=False, cast=bool)
 
 LANGUAGE_CODE = 'ru-ru'
 
+YOOKASSA_SHOP_ID="1366214"
+YOOKASSA_SECRET_KEY="test_xsZWTIiiFYXxAZF0deSttKmUCY-3p2SyW4M0nLUuTkg"
 
 INSTALLED_APPS = [
     # Admin UI
