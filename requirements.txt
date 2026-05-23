@@ -25,3 +25,4 @@ sqlparse==0.5.3
 typing_extensions==4.13.2
 uritemplate==4.1.1
 yookassa==3.3.0
+gunicorn==23.0.0
