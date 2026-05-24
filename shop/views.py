@@ -183,6 +183,10 @@ class OrderViewSet(viewsets.ModelViewSet):
                 quantity=item.quantity
             )
 
+        
+         Configuration.account_id = settings.YOOKASSA_SHOP_ID
+        Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+
         # 3. Создаём платёж в ЮKassa (конфигурация уже выполнена глобально в начале файла)
         payment = Payment.create({
             "amount": {
