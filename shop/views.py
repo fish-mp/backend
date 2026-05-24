@@ -184,7 +184,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         
-         Configuration.account_id = settings.YOOKASSA_SHOP_ID
+        Configuration.account_id = settings.YOOKASSA_SHOP_ID
         Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
         # 3. Создаём платёж в ЮKassa (конфигурация уже выполнена глобально в начале файла)
@@ -195,7 +195,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             },
             "confirmation": {
                 "type": "redirect",
-                "return_url": "http://localhost:5173/order-success"
+                "return_url": "https://fishkids.ru/order-success" 
             },
             "capture": True,
             "description": f"Заказ №{order.id} от {request.user.email}",
