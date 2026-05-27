@@ -23,7 +23,13 @@ class CourseSerializer(ModelSerializer):
         fields = '__all__'
 
     def get_files(self, obj):
-        files = Files.objects.filter(course=obj, for_teacher=False)
+        user = self.context['request'].user
+        if not user.is_authenticated:
+            return None
+        if user.is_staff or user.is_superuser: 
+            files = Files.objects.filter(course=obj)
+        else: 
+            files = Files.objects.filter(course=obj, for_teacher=False)
         return  FileSerializer(files, many=True).data
 
     def get_enrollment_state(self, obj):
