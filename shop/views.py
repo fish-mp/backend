@@ -16,11 +16,55 @@ from shop.serializers import (
 from rest_framework.views import APIView
 from yookassa import Configuration, Payment
 from django.conf import settings
+from django.db import transaction
+from django.db.models import F
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.http import HttpResponse, JsonResponse
 import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def configure_yookassa():
+    """Однократно настраивает реквизиты ЮKassa из настроек проекта."""
+    Configuration.account_id = settings.YOOKASSA_SHOP_ID
+    Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+
+
+def mark_order_paid(order):
+    """
+    Идемпотентно переводит заказ в статус 'paid', списывает остатки со склада
+    и очищает корзину пользователя. Безопасно вызывать повторно: при повторном
+    вызове заказ уже не в статусе 'pending', поэтому ничего не произойдёт.
+    """
+    with transaction.atomic():
+        # Блокируем заказ, чтобы параллельные вызовы вебхука не списали склад дважды
+        locked_order = Order.objects.select_for_update().get(pk=order.pk)
+        if locked_order.status != 'pending':
+            return False
+
+        for item in locked_order.items.select_related('product').all():
+            if item.product is None:
+                continue
+            # Атомарное списание остатка на уровне БД
+            Product.objects.filter(pk=item.product.pk).update(
+                stock_quantity=F('stock_quantity') - item.quantity
+            )
+            product = Product.objects.get(pk=item.product.pk)
+            if product.stock_quantity <= 0:
+                product.stock_quantity = max(product.stock_quantity, 0)
+                product.is_in_stock = False
+                product.save(update_fields=['stock_quantity', 'is_in_stock'])
+
+        locked_order.status = 'paid'
+        locked_order.save(update_fields=['status'])
+
+        # Корзину очищаем только после подтверждённой оплаты
+        CartItem.objects.filter(cart__user=locked_order.user).delete()
+    return True
 
 
 class IsOwnerOrReadOnly(IsAuthenticatedOrReadOnly):
@@ -53,14 +97,45 @@ class YooKassaWebhookView(APIView):
     def post(self, request):
         try:
             event = json.loads(request.body)
-            if event.get('event') == 'payment.succeeded':
-                payment_id = event['object']['id']
-                # Обновляем статус заказа
-                Order.objects.filter(payment_id=payment_id, status='pending').update(status='paid')
+        except (ValueError, TypeError):
+            logger.warning("YooKassa webhook: невалидный JSON")
+            return HttpResponse(status=400)
+
+        event_type = event.get('event')
+        payment_obj = event.get('object') or {}
+        payment_id = payment_obj.get('id')
+
+        if not payment_id:
             return HttpResponse(status=200)
-        except Exception as e:
-            # Логируем ошибку, но возвращаем 200, чтобы ЮKassa не повторяла
+
+        order = Order.objects.filter(payment_id=payment_id).first()
+        if order is None:
+            # Платёж не относится к нашим заказам — игнорируем
             return HttpResponse(status=200)
+
+        # Не доверяем телу вебхука: подтверждаем статус напрямую у ЮKassa.
+        try:
+            configure_yookassa()
+            payment = Payment.find_one(payment_id)
+        except Exception:
+            logger.exception("YooKassa webhook: не удалось проверить платёж %s", payment_id)
+            # 500 -> ЮKassa повторит доставку позже
+            return HttpResponse(status=500)
+
+        # Сверяем сумму, чтобы исключить подмену
+        if str(payment.amount.value) != str(order.total_amount):
+            logger.error(
+                "YooKassa webhook: сумма платежа %s не совпадает с заказом %s",
+                payment_id, order.id,
+            )
+            return HttpResponse(status=200)
+
+        if event_type == 'payment.succeeded' and payment.status == 'succeeded':
+            mark_order_paid(order)
+        elif event_type == 'payment.canceled' and payment.status == 'canceled':
+            Order.objects.filter(pk=order.pk, status='pending').update(status='cancelled')
+
+        return HttpResponse(status=200)
         
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Product.objects.select_related('brand', 'category', 'color').prefetch_related('images').all()
@@ -160,58 +235,97 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Order.objects.filter(user=self.request.user)
 
     def create(self, request, *args, **kwargs):
-        cart = Cart.objects.get(user=request.user)
-        if not cart.items.exists():
+        cart, _ = Cart.objects.get_or_create(user=request.user)
+        cart_items = list(cart.items.select_related('product').all())
+        if not cart_items:
             return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
 
-        cart_items = list(cart.items.select_related('product').all())
+        # 1. Проверяем доступность и остатки до создания заказа
+        for item in cart_items:
+            product = item.product
+            if not product.is_available:
+                return Response(
+                    {"error": f"Товар «{product.name}» недоступен для заказа"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if product.stock_quantity < item.quantity:
+                return Response(
+                    {"error": f"Недостаточно товара «{product.name}» на складе"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         total_amount = sum(item.product.price * item.quantity for item in cart_items)
 
-        # 1. Создаём заказ со статусом "pending"
-        order = Order.objects.create(
-            user=request.user,
-            status='pending',
-            total_amount=total_amount
-        )
-
-        # 2. Переносим товары в OrderItem
-        for item in cart_items:
-            OrderItem.objects.create(
-                order=order,
-                product=item.product,
-                price=item.product.price,
-                quantity=item.quantity
+        # 2. Создаём заказ и позиции атомарно: при сбое не останется «висячих» записей
+        with transaction.atomic():
+            order = Order.objects.create(
+                user=request.user,
+                status='pending',
+                total_amount=total_amount,
             )
+            OrderItem.objects.bulk_create([
+                OrderItem(
+                    order=order,
+                    product=item.product,
+                    price=item.product.price,
+                    quantity=item.quantity,
+                )
+                for item in cart_items
+            ])
 
-        
-        Configuration.account_id = settings.YOOKASSA_SHOP_ID
-        Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
-
-        # 3. Создаём платёж в ЮKassa (конфигурация уже выполнена глобально в начале файла)
-        payment = Payment.create({
-            "amount": {
-                "value": str(total_amount),
-                "currency": "RUB"
-            },
-            "confirmation": {
-                "type": "redirect",
-                "return_url": "https://fishkids.ru/order-success" 
-            },
-            "capture": True,
-            "description": f"Заказ №{order.id} от {request.user.email}",
-            "metadata": {
-                "order_id": order.id
+        # 3. Создаём платёж в ЮKassa (с чеком по 54-ФЗ)
+        configure_yookassa()
+        receipt_items = [
+            {
+                "description": item.product.name[:128],
+                "quantity": str(item.quantity),
+                "amount": {
+                    "value": str(item.product.price),
+                    "currency": "RUB",
+                },
+                "vat_code": settings.YOOKASSA_VAT_CODE,
+                "payment_subject": "commodity",
+                "payment_mode": "full_payment",
             }
-        })
+            for item in cart_items
+        ]
+        try:
+            payment = Payment.create({
+                "amount": {
+                    "value": str(total_amount),
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": "https://fishkids.ru/order-success"
+                },
+                "capture": True,
+                "description": f"Заказ №{order.id} от {request.user.email}",
+                "receipt": {
+                    "customer": {"email": request.user.email},
+                    "items": receipt_items,
+                },
+                "metadata": {
+                    "order_id": order.id
+                }
+            })
+        except Exception:
+            logger.exception("Не удалось создать платёж ЮKassa для заказа %s", order.id)
+            # Откатываем заказ, чтобы не копить непроведённые «pending»
+            order.delete()
+            return Response(
+                {"error": "Не удалось создать платёж. Попробуйте позже."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         # 4. Сохраняем payment_id в заказ
         order.payment_id = payment.id
-        order.save()
+        order.save(update_fields=['payment_id'])
 
-        # 5. Очищаем корзину ТОЛЬКО ПОСЛЕ УСПЕШНОГО СОЗДАНИЯ ПЛАТЕЖА
-        cart.items.all().delete()
+        # Корзина и остатки очищаются/списываются ТОЛЬКО после подтверждения
+        # оплаты в YooKassaWebhookView — чтобы не терять товары при незавершённой оплате.
 
-        # 6. Возвращаем ссылку на оплату
+        # 5. Возвращаем ссылку на оплату
         return Response({
             "order_id": order.id,
             "confirmation_url": payment.confirmation.confirmation_url

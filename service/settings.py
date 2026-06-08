@@ -13,8 +13,10 @@ DEBUG: bool = config("DEBUG", default=False, cast=bool)
 
 LANGUAGE_CODE = 'ru-ru'
 
-YOOKASSA_SHOP_ID = "1366214"
-YOOKASSA_SECRET_KEY = "test_xsZWTIiiFYXxAZF0deSttKmUCY-3p2SyW4M0nLUuTkg"
+YOOKASSA_SHOP_ID = config("YOOKASSA_SHOP_ID", default="", cast=str)
+YOOKASSA_SECRET_KEY = config("YOOKASSA_SECRET_KEY", default="", cast=str)
+# Ставка НДС для чека (54-ФЗ): 1 — без НДS, 2 — 0%, 3 — 10%, 4 — 20%, 5 — 10/110, 6 — 20/120
+YOOKASSA_VAT_CODE = config("YOOKASSA_VAT_CODE", default=1, cast=int)
 
 INSTALLED_APPS = [
     # Admin UI
@@ -180,7 +182,10 @@ CSRF_TRUSTED_ORIGINS = [
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:8000",
+    "http://localhost:5173",
     "https://fishkids.ru",
+    "https://fish-mp.miv-dev.ru",
+    "https://fish-mp.netlify.app",
 ]
 
 ALLOWED_HOSTS = [
@@ -193,7 +198,9 @@ ALLOWED_HOSTS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
-CORS_ALLOW_ALL_ORIGINS = True
+# Разрешаем любые источники только в режиме разработки.
+# В проде работает строгий белый список CORS_ALLOWED_ORIGINS выше.
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 AUTH_USER_MODEL = 'users.CustomUser'
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
