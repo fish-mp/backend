@@ -253,6 +253,8 @@ class OrderViewSet(viewsets.ModelViewSet):
         apartment = (data.get('apartment') or '').strip()
         postal_code = (data.get('postal_code') or '').strip()
         offer_accepted = bool(data.get('offer_accepted'))
+        delivery_method = (data.get('delivery_method') or 'pickup').strip()
+        beyond_mkad = bool(data.get('beyond_mkad'))
 
         required = {
             'email': email, 'phone': phone,
@@ -290,8 +292,9 @@ class OrderViewSet(viewsets.ModelViewSet):
                     {"error": f"Недостаточно товара «{product.name}» на складе"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
         total_amount = sum(item.product.price * item.quantity for item in cart_items)
+        if delivery_method == 'delivery':
+            total_amount += 1000 if beyond_mkad else 300
 
         # 2. Создаём заказ и позиции атомарно: при сбое не останется «висячих» записей
         with transaction.atomic():
