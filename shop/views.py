@@ -258,8 +258,12 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         required = {
             'email': email, 'phone': phone,
-            'city': city, 'street': street, 'house': house,
         }
+        if delivery_method != 'pickup':
+            required = {
+                'email': email, 'phone': phone,
+                'city': city, 'street': street, 'house': house,
+            }
         missing = [name for name, value in required.items() if not value]
         if missing:
             return Response(
