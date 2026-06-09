@@ -20,6 +20,7 @@ from django.db import transaction
 from django.db.models import F
 from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
+from decimal import Decimal
 import re
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
@@ -296,9 +297,11 @@ class OrderViewSet(viewsets.ModelViewSet):
                     {"error": f"Недостаточно товара «{product.name}» на складе"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        total_amount = sum(item.product.price * item.quantity for item in cart_items)
+        items_total = sum(item.product.price * item.quantity for item in cart_items)
+        delivery_cost = Decimal('0')
         if delivery_method == 'delivery':
-            total_amount += 1000 if beyond_mkad else 300
+            delivery_cost = Decimal('1000') if beyond_mkad else Decimal('300')
+        total_amount = (items_total + delivery_cost).quantize(Decimal('0.01'))
 
         # 2. Создаём заказ и позиции атомарно: при сбое не останется «висячих» записей
         with transaction.atomic():
@@ -341,6 +344,19 @@ class OrderViewSet(viewsets.ModelViewSet):
             }
             for item in cart_items
         ]
+        # Доставка — отдельная позиция чека, иначе сумма позиций не сойдётся с amount
+        if delivery_cost > 0:
+            receipt_items.append({
+                "description": "Доставка",
+                "quantity": "1",
+                "amount": {
+                    "value": str(delivery_cost),
+                    "currency": "RUB",
+                },
+                "vat_code": settings.YOOKASSA_VAT_CODE,
+                "payment_subject": "service",
+                "payment_mode": "full_payment",
+            })
         # Покупатель в чеке: email обязателен, телефон — в формате только цифр (E.164)
         receipt_customer = {"email": email}
         phone_digits = re.sub(r'\D', '', phone)
