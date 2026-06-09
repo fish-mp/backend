@@ -1,0 +1,6 @@
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.per-file-ignores]
+"**/migrations/**" = ["ALL"]
+"**/__init__.py" = ["F401"]
