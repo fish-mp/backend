@@ -197,10 +197,21 @@ class Order(models.Model):
         default='new', verbose_name="Статус"
     )
     total_amount = models.DecimalField(
-        max_digits=10, decimal_places=2, 
+        max_digits=10, decimal_places=2,
         verbose_name="Общая сумма"
     )
     payment_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="ID платежа в ЮKassa")
+
+    # Контактные данные и адрес доставки, заполняются при оформлении заказа
+    email = models.EmailField(blank=True, verbose_name="Email для чека")
+    phone = models.CharField(max_length=20, blank=True, verbose_name="Телефон")
+    city = models.CharField(max_length=100, blank=True, verbose_name="Город")
+    street = models.CharField(max_length=150, blank=True, verbose_name="Улица")
+    house = models.CharField(max_length=30, blank=True, verbose_name="Дом")
+    apartment = models.CharField(max_length=30, blank=True, verbose_name="Квартира")
+    postal_code = models.CharField(max_length=20, blank=True, verbose_name="Индекс")
+    offer_accepted = models.BooleanField(default=False, verbose_name="Согласие с публичной офертой")
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
     class Meta:

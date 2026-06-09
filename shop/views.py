@@ -18,6 +18,9 @@ from yookassa import Configuration, Payment
 from django.conf import settings
 from django.db import transaction
 from django.db.models import F
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError
+import re
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -240,6 +243,40 @@ class OrderViewSet(viewsets.ModelViewSet):
         if not cart_items:
             return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 0. Контактные данные, адрес доставки и согласие с офертой
+        data = request.data
+        email = (data.get('email') or '').strip()
+        phone = (data.get('phone') or '').strip()
+        city = (data.get('city') or '').strip()
+        street = (data.get('street') or '').strip()
+        house = (data.get('house') or '').strip()
+        apartment = (data.get('apartment') or '').strip()
+        postal_code = (data.get('postal_code') or '').strip()
+        offer_accepted = bool(data.get('offer_accepted'))
+
+        required = {
+            'email': email, 'phone': phone,
+            'city': city, 'street': street, 'house': house,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            return Response(
+                {"error": "Заполните обязательные поля", "fields": missing},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_email(email)
+        except ValidationError:
+            return Response(
+                {"error": "Некорректный email", "fields": ["email"]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not offer_accepted:
+            return Response(
+                {"error": "Необходимо согласие с публичной офертой", "fields": ["offer_accepted"]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # 1. Проверяем доступность и остатки до создания заказа
         for item in cart_items:
             product = item.product
@@ -262,6 +299,14 @@ class OrderViewSet(viewsets.ModelViewSet):
                 user=request.user,
                 status='pending',
                 total_amount=total_amount,
+                email=email,
+                phone=phone,
+                city=city,
+                street=street,
+                house=house,
+                apartment=apartment,
+                postal_code=postal_code,
+                offer_accepted=offer_accepted,
             )
             OrderItem.objects.bulk_create([
                 OrderItem(
@@ -289,6 +334,12 @@ class OrderViewSet(viewsets.ModelViewSet):
             }
             for item in cart_items
         ]
+        # Покупатель в чеке: email обязателен, телефон — в формате только цифр (E.164)
+        receipt_customer = {"email": email}
+        phone_digits = re.sub(r'\D', '', phone)
+        if phone_digits:
+            receipt_customer["phone"] = phone_digits
+
         try:
             payment = Payment.create({
                 "amount": {
@@ -302,7 +353,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "capture": True,
                 "description": f"Заказ №{order.id} от {request.user.email}",
                 "receipt": {
-                    "customer": {"email": request.user.email},
+                    "customer": receipt_customer,
                     "items": receipt_items,
                 },
                 "metadata": {

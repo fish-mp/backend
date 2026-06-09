@@ -72,9 +72,9 @@ class ReviewAdmin(ModelAdmin):
 
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
-    list_display = ('id', 'user', 'status', 'total_amount', 'created_at')
+    list_display = ('id', 'user', 'status', 'total_amount', 'phone', 'city', 'created_at')
     list_filter = ('status', 'created_at')
-    search_fields = ('user__email', 'id')
+    search_fields = ('user__email', 'id', 'email', 'phone', 'city')
     inlines = [OrderItemInline]
     readonly_fields = ('created_at',)
 
