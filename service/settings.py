@@ -18,6 +18,11 @@ YOOKASSA_SECRET_KEY = config("YOOKASSA_SECRET_KEY", default="", cast=str)
 # Ставка НДС для чека (54-ФЗ): 1 — без НДS, 2 — 0%, 3 — 10%, 4 — 20%, 5 — 10/110, 6 — 20/120
 YOOKASSA_VAT_CODE = config("YOOKASSA_VAT_CODE", default=1, cast=int)
 
+# Telegram-уведомления продавцу об оплаченных заказах.
+# TELEGRAM_BOT_TOKEN — токен бота от @BotFather; TELEGRAM_CHAT_ID — id чата/группы продавца.
+TELEGRAM_BOT_TOKEN = config("TELEGRAM_BOT_TOKEN", default="", cast=str)
+TELEGRAM_CHAT_ID = config("TELEGRAM_CHAT_ID", default="", cast=str)
+
 INSTALLED_APPS = [
     # Admin UI
     "unfold",

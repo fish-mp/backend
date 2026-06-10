@@ -22,6 +22,7 @@ from django.core.validators import validate_email
 from django.core.exceptions import ValidationError
 from decimal import Decimal
 import re
+import requests
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
@@ -36,6 +37,44 @@ def configure_yookassa():
     """Однократно настраивает реквизиты ЮKassa из настроек проекта."""
     Configuration.account_id = settings.YOOKASSA_SHOP_ID
     Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
+
+
+def notify_seller_order_paid(order):
+    """
+    Уведомляет продавца об оплаченном заказе в Telegram.
+    Ошибки не пробрасываем — сбой уведомления не должен влиять на обработку оплаты.
+    """
+    token = settings.TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        return
+    try:
+        lines = [
+            f"🛒 Оплачен заказ №{order.id}",
+            f"Сумма: {order.total_amount} ₽",
+            "",
+            "Товары:",
+        ]
+        for item in order.items.select_related('product').all():
+            name = item.product.name if item.product else "удалённый товар"
+            lines.append(f"• {name} × {item.quantity} — {item.price} ₽")
+
+        address = ", ".join(filter(None, [
+            order.postal_code, order.city, order.street,
+            f"д. {order.house}" if order.house else "",
+            f"кв. {order.apartment}" if order.apartment else "",
+        ]))
+        lines += ["", f"Покупатель: {order.email}", f"Телефон: {order.phone}"]
+        if address:
+            lines.append(f"Адрес: {address}")
+
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": "\n".join(lines)},
+            timeout=10,
+        )
+    except Exception:
+        logger.exception("Не удалось отправить Telegram-уведомление о заказе %s", order.id)
 
 
 def mark_order_paid(order):
@@ -68,6 +107,9 @@ def mark_order_paid(order):
 
         # Корзину очищаем только после подтверждённой оплаты
         CartItem.objects.filter(cart__user=locked_order.user).delete()
+
+        # Уведомляем продавца только после успешного коммита транзакции
+        transaction.on_commit(lambda: notify_seller_order_paid(locked_order))
     return True
 
 
