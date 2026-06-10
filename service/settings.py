@@ -65,9 +65,10 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.BasicAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
+        # JWT первым: для SPA-запросов с Bearer не доходит до SessionAuthentication,
+        # которая на небезопасных методах требует CSRF-токен (иначе 403 "CSRF Failed").
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
