@@ -300,7 +300,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         items_total = sum(item.product.price * item.quantity for item in cart_items)
         delivery_cost = Decimal('0')
         if delivery_method == 'delivery':
-            delivery_cost = Decimal('1000') if beyond_mkad else Decimal('300')
+            delivery_cost = Decimal('3000') if beyond_mkad else Decimal('1500')
         total_amount = (items_total + delivery_cost).quantize(Decimal('0.01'))
 
         # 2. Создаём заказ и позиции атомарно: при сбое не останется «висячих» записей
