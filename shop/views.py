@@ -341,7 +341,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 )
         items_total = sum(item.product.price * item.quantity for item in cart_items)
         delivery_cost = Decimal('0')
-        if delivery_method == 'delivery':
+        # Доставка бесплатна при заказе от 10 000 ₽; иначе 1500 ₽ (в МКАД) или 3000 ₽ (за МКАД)
+        if delivery_method == 'delivery' and items_total < Decimal('10000'):
             delivery_cost = Decimal('3000') if beyond_mkad else Decimal('1500')
         total_amount = (items_total + delivery_cost).quantize(Decimal('0.01'))
 
