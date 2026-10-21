@@ -1,44 +1,63 @@
-from unfold.admin import ModelAdmin, StackedInline
 from django.contrib import admin
-from courses.models import *
+from django.utils.html import format_html
+from unfold.admin import ModelAdmin, TabularInline
+from courses.models import Course, Enrollment, Files, Tag, School, Teacher, CourseModule
 
-# Register your models here.
-class CourseInline(StackedInline):
-    model = Course
-    extra = 0  # Не показывать пустые формы для новых курсов
-    fields = ['title', 'short_description']
-    show_change_link = True  # Показывать ссылку на редактирование курса
+class CourseModuleInline(TabularInline):
+    model = CourseModule
+    extra = 0
+
+@admin.register(School)
+class SchoolAdmin(ModelAdmin):
+    list_display = ('title', 'subtitle', 'order', 'is_active')
+    list_editable = ('order', 'is_active')
+    search_fields = ('title', 'subtitle')
+    prepopulated_fields = {'slug': ('title',)}
+
+@admin.register(Teacher)
+class TeacherAdmin(ModelAdmin):
+    list_display = ('full_name', 'school', 'order', 'photo_preview')
+    list_filter = ('school',)
+    list_editable = ('order',)
+
+    def photo_preview(self, obj):
+        if obj.photo:
+            return format_html('<img src="{}" style="height: 45px; width: 45px; object-fit: cover; border-radius: 50%;"/>', obj.photo.url)
+        return "Нет фото"
+    photo_preview.short_description = "Фото"
 
 @admin.register(Tag)
 class TagAdmin(ModelAdmin):
     list_display = ('name', 'course_count')
-    search_fields = ('name',)
-    inlines = [CourseInline]  # Показывать курсы с этим тегом
-    
     def course_count(self, obj):
         return obj.course_set.count()
-    course_count.short_description = 'Количество курсов'
 
 @admin.register(Course)
 class CourseAdmin(ModelAdmin):
-    list_display = ('title', 'short_description', 'get_tag')
-    search_fields = ('title', 'description')
-    
-    def get_tag(self, obj):
-        return obj.tag.name if obj.tag else 'Нет тега'
-    get_tag.short_description = 'Тег'
+    list_display = ('title', 'school', 'course_type', 'academic_hours', 'is_free', 'is_popular')
+    list_filter = ('school', 'course_type', 'is_free', 'is_popular')
+    list_editable = ('is_free', 'is_popular')
+    search_fields = ('title',)
+    inlines = [CourseModuleInline]
+
+    fieldsets = (
+        ('Основная информация', {
+            'fields': ('school', 'title', 'course_type', 'tag', 'is_free', 'is_popular')
+        }),
+        ('Специфика ДПО', {
+            'fields': ('academic_hours', 'license_file', 'accreditation_file', 'certificate_sample'),
+            'classes': ('collapse',),
+            'description': 'Заполняйте только для курсов повышения квалификации и переподготовки.'
+        }),
+        ('Контент', {
+            'fields': ('description', 'short_description', 'image', 'files')
+        }),
+    )
 
 @admin.register(Files)
 class FilesAdmin(ModelAdmin):
-    list_display = ('title', 'file')
-    search_fields = ('title',)
+    list_display = ('title', 'file', 'for_teacher')
 
 @admin.register(Enrollment)
 class EnrollmentAdmin(ModelAdmin):
-    list_display = ('user', 'course', 'state')
-    search_fields = ('user__email', 'course__title', 'state')
-    list_filter = ('state',)
-
-    def user_email(self, obj):
-        return obj.user.email
-    user_email.short_description = 'User Email'
+    list_display = ('user', 'course', 'state', 'created_at')
