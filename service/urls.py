@@ -16,35 +16,33 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from rest_framework.routers import SimpleRouter
 from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
 from django.conf import settings
 from django.conf.urls.static import static
 from shop.views import YooKassaWebhookView
+from courses.views import SchoolViewSet, TeacherViewSet, LandingPageAPIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
 
 schema_view = get_schema_view(
-
-   openapi.Info(
-      title="Snippets API",
-      default_version='v1',
-      description="Test description",
-      terms_of_service="https://www.google.com/policies/terms/",
-      contact=openapi.Contact(email="contact@snippets.local"),
-      license=openapi.License(name="BSD License"),
-   ),
-    url="http://127.0.0.1:8000/",
-   public=True,
+   openapi.Info(title="Snippets API", default_version='v1', public=True),
+   url="http://127.0.0.1:8000/",
    permission_classes=(permissions.AllowAny,),
 )
 
-urlpatterns = [
+school_router = SimpleRouter()
+school_router.register(r'schools', SchoolViewSet, basename='schools')
+school_router.register(r'teachers', TeacherViewSet, basename='teachers')
 
+urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
+    path('api/landing/', LandingPageAPIView.as_view(), name='landing-page'),
+    path('api/', include(school_router.urls)),
     path('api/users/', include('users.urls')),
     path('api/events/', include('events.urls')),
     path('api/news/', include('news.urls')),
@@ -53,4 +51,3 @@ urlpatterns = [
     path('api/yookassa-webhook/', YooKassaWebhookView.as_view(), name='yookassa_webhook'),
     path('api/swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-
