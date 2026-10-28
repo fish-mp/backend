@@ -29,6 +29,8 @@ from django.utils.decorators import method_decorator
 from django.http import HttpResponse, JsonResponse
 import json
 import logging
+import threading
+from django.core.mail import send_mail
 
 logger = logging.getLogger(__name__)
 
@@ -38,44 +40,108 @@ def configure_yookassa():
     Configuration.account_id = settings.YOOKASSA_SHOP_ID
     Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
+def build_order_summary(order) -> str:
+    """Формирует текст сводки по заказу для Telegram и email менеджеров."""
+    lines = [
+        f"🛒 Оплачен заказ №{order.id}",
+        f"Сумма: {order.total_amount} ₽",
+        "",
+        "Товары:",
+    ]
+    for item in order.items.select_related('product').all():
+        name = item.product.name if item.product else "удалённый товар"
+        lines.append(f"• {name} × {item.quantity} — {item.price} ₽")
 
-def notify_seller_order_paid(order):
-    """
-    Уведомляет продавца об оплаченном заказе в Telegram.
-    Ошибки не пробрасываем — сбой уведомления не должен влиять на обработку оплаты.
-    """
+    address = ", ".join(filter(None, [
+        order.postal_code, order.city, order.street,
+        f"д. {order.house}" if order.house else "",
+        f"кв. {order.apartment}" if order.apartment else "",
+    ]))
+    lines += ["", f"Покупатель: {order.email}", f"Телефон: {order.phone}"]
+    if address:
+        lines.append(f"Адрес: {address}")
+    else:
+        lines.append("Способ получения: Самовывоз")
+
+    return "\n".join(lines)
+
+
+def send_telegram_notification(summary_text: str, order_id: int):
+    """Отправляет уведомление о заказе в Telegram."""
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     if not token or not chat_id:
         return
     try:
-        lines = [
-            f"🛒 Оплачен заказ №{order.id}",
-            f"Сумма: {order.total_amount} ₽",
-            "",
-            "Товары:",
-        ]
-        for item in order.items.select_related('product').all():
-            name = item.product.name if item.product else "удалённый товар"
-            lines.append(f"• {name} × {item.quantity} — {item.price} ₽")
-
-        address = ", ".join(filter(None, [
-            order.postal_code, order.city, order.street,
-            f"д. {order.house}" if order.house else "",
-            f"кв. {order.apartment}" if order.apartment else "",
-        ]))
-        lines += ["", f"Покупатель: {order.email}", f"Телефон: {order.phone}"]
-        if address:
-            lines.append(f"Адрес: {address}")
-
-        requests.post(
+        response = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": "\n".join(lines)},
+            json={"chat_id": chat_id, "text": summary_text},
             timeout=10,
         )
+        response.raise_for_status()
     except Exception:
-        logger.exception("Не удалось отправить Telegram-уведомление о заказе %s", order.id)
+        logger.exception("Не удалось отправить Telegram-уведомление о заказе %s", order_id)
 
+
+def send_seller_email_notification(summary_text: str, order_id: int, total_amount):
+    """Отправляет письмо о совершенной покупке вам и другим менеджерам."""
+    recipient_list = getattr(settings, "SELLER_NOTIFICATION_EMAILS", [])
+    from_email = settings.DEFAULT_FROM_EMAIL or settings.EMAIL_HOST_USER
+    if not recipient_list or not from_email:
+        return
+    try:
+        send_mail(
+            subject=f"Оплачен новый заказ №{order_id} на сумму {total_amount} ₽",
+            message=summary_text,
+            from_email=from_email,
+            recipient_list=recipient_list,
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Не удалось отправить email продавцу о заказе %s", order_id)
+
+
+def send_buyer_email_notification(buyer_email: str, order_id: int):
+    """Отправляет письмо покупателю о том, что заказ сформирован."""
+    from_email = settings.DEFAULT_FROM_EMAIL or settings.EMAIL_HOST_USER
+    if not buyer_email or not from_email:
+        return
+    try:
+        message = (
+            f"Здравствуйте!\n\n"
+            f"Ваш заказ №{order_id} сформирован, нужно дождаться, когда менеджер с вами свяжется.\n\n"
+            f"Спасибо за покупку в FishKids!"
+        )
+        send_mail(
+            subject=f"Заказ №{order_id} сформирован — FishKids",
+            message=message,
+            from_email=from_email,
+            recipient_list=[buyer_email],
+            fail_silently=False,
+        )
+    except Exception:
+        logger.exception("Не удалось отправить email покупателю (%s) по заказу %s", buyer_email, order_id)
+
+
+def notify_seller_order_paid(order):
+    """
+    Собирает данные оплаченного заказа и запускает отправку всех уведомлений
+    (в Telegram, на почту менеджерам и на почту покупателю) в фоновом потоке.
+    """
+    try:
+        summary_text = build_order_summary(order)
+        order_id = order.id
+        total_amount = order.total_amount
+        buyer_email = order.email
+
+        def _send_all():
+            send_telegram_notification(summary_text, order_id)
+            send_seller_email_notification(summary_text, order_id, total_amount)
+            send_buyer_email_notification(buyer_email, order_id)
+
+        threading.Thread(target=_send_all, daemon=True).start()
+    except Exception:
+        logger.exception("Ошибка при подготовке уведомлений для заказа %s", order.id)
 
 def mark_order_paid(order):
     """
@@ -221,6 +287,8 @@ class FavoriteViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False) or not self.request.user.is_authenticated:
+            return Favorite.objects.none()
         return Favorite.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
@@ -231,6 +299,8 @@ class CartViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False) or not self.request.user.is_authenticated:
+            return Cart.objects.none()
         return Cart.objects.filter(user=self.request.user)
 
     def list(self, request, *args, **kwargs):
@@ -243,6 +313,8 @@ class CartItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False) or not self.request.user.is_authenticated:
+            return CartItem.objects.none()
         cart, _ = Cart.objects.get_or_create(user=self.request.user)
         return CartItem.objects.filter(cart=cart)
 
@@ -278,6 +350,8 @@ class OrderViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False) or not self.request.user.is_authenticated:
+            return Order.objects.none()
         return Order.objects.filter(user=self.request.user)
 
     def create(self, request, *args, **kwargs):

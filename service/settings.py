@@ -23,6 +23,27 @@ YOOKASSA_VAT_CODE = config("YOOKASSA_VAT_CODE", default=1, cast=int)
 TELEGRAM_BOT_TOKEN = config("TELEGRAM_BOT_TOKEN", default="", cast=str)
 TELEGRAM_CHAT_ID = config("TELEGRAM_CHAT_ID", default="", cast=str)
 
+# Настройки почты (SMTP) для отправки уведомлений
+EMAIL_BACKEND = config(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.smtp.EmailBackend",
+    cast=str,
+)
+EMAIL_HOST = config("EMAIL_HOST", default="smtp.yandex.ru", cast=str)
+EMAIL_PORT = config("EMAIL_PORT", default=465, cast=int)
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=False, cast=bool)
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", default=True, cast=bool)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="", cast=str)
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="", cast=str)
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER, cast=str)
+
+# Список email-адресов менеджеров (через запятую), которым приходят уведомления о заказах
+SELLER_NOTIFICATION_EMAILS = [
+    email.strip()
+    for email in config("SELLER_NOTIFICATION_EMAILS", default="", cast=str).split(",")
+    if email.strip()
+]
+
 INSTALLED_APPS = [
     # Admin UI
     "unfold",
