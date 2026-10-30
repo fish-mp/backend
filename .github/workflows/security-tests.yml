@@ -1,0 +1,21 @@
+name: Backend tests
+on:
+  push:
+    branches: [master]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DJANGO_SECRET_KEY: test-only-ci-key-not-for-deployment-123456789012345678901234567890
+      EMAIL_BACKEND: django.core.mail.backends.locmem.EmailBackend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - run: bash -n deployment/deploy.sh
+      - run: python manage.py check
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py test users shop courses

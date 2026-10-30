@@ -1,8 +1,10 @@
 from rest_framework import serializers
 from users.models import CustomUser
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=128)
     
     class Meta:
         model = CustomUser
@@ -18,6 +20,19 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         if not value.strip():
             raise serializers.ValidationError("Поле 'Имя' не может быть пустым")
         return value
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if CustomUser.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Этот email уже зарегистрирован. Войдите или запросите письмо подтверждения.")
+        return value
+
+    def validate(self, attrs):
+        try:
+            validate_password(attrs['password'], CustomUser(**attrs))
+        except ValidationError as exc:
+            raise serializers.ValidationError({'password': exc.messages})
+        return attrs
 
     def validate_city(self, value):
         if not value.strip():

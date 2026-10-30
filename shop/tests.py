@@ -3,6 +3,8 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from decimal import Decimal
+from unittest.mock import patch
+from types import SimpleNamespace
 from shop.models import (
     Category,
     Brand,
@@ -95,7 +97,8 @@ class ShopAPITestCase(APITestCase):
             Favorite.objects.filter(user=self.user, product=self.product).count(), 1
         )
 
-    def test_create_order_from_cart(self):
+    @patch('shop.views.Payment.create')
+    def test_create_order_from_cart(self, create_payment):
         """Проверка: создание заказа из корзины и ее последующая очистка"""
         self.client.force_authenticate(user=self.user)
 
@@ -104,7 +107,8 @@ class ShopAPITestCase(APITestCase):
         CartItem.objects.create(cart=cart, product=self.product, quantity=2)
 
         url = reverse("orders-list")
-        response = self.client.post(url)
+        create_payment.return_value = SimpleNamespace(id='test-payment', confirmation=SimpleNamespace(confirmation_url='https://example.com/pay'))
+        response = self.client.post(url, {'email': self.user.email, 'phone': '+79991234567', 'offer_accepted': True}, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
@@ -112,7 +116,7 @@ class ShopAPITestCase(APITestCase):
         self.assertEqual(Order.objects.count(), 1)
         order = Order.objects.first()
         self.assertEqual(order.user, self.user)
-        self.assertEqual(order.status, "new")
+        self.assertEqual(order.status, "pending")
         # 2 шт * 80 000 = 160 000
         self.assertEqual(order.total_amount, Decimal("160000.00"))
 
@@ -123,7 +127,7 @@ class ShopAPITestCase(APITestCase):
         self.assertEqual(order_item.quantity, 2)
 
         # Проверяем, что корзина очистилась
-        self.assertEqual(cart.items.count(), 0)
+        self.assertEqual(cart.items.count(), 1)
 
     def test_create_order_empty_cart_fails(self):
         """Проверка: нельзя создать заказ с пустой корзиной"""

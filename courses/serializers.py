@@ -1,10 +1,16 @@
 from rest_framework import serializers
 from rest_framework.serializers import ModelSerializer
 from rest_framework.fields import SerializerMethodField
+from courses.file_access import file_url
 from courses.models import Course, Enrollment, Files, Tag, School, Teacher, CourseModule
 
 
 class FileSerializer(ModelSerializer):
+    file = SerializerMethodField()
+
+    def get_file(self, obj):
+        return file_url(obj, self.context.get('request'))
+
     class Meta:
         model = Files
         fields = '__all__'
@@ -50,7 +56,7 @@ class SchoolWithPopularCoursesSerializer(ModelSerializer):
         fields = ['id', 'title', 'subtitle', 'slug', 'order', 'popular_courses']
 
     def get_popular_courses(self, obj):
-        courses = obj.courses.filter(is_popular=True)
+        courses = obj.popular_courses
         return CourseCardSerializer(courses, many=True, context=self.context).data
 
 
@@ -66,7 +72,7 @@ class CourseSerializer(ModelSerializer):
     files = SerializerMethodField('get_files')
     tag = TagSerializer(many=False, read_only=True)
     school_details = SchoolSerializer(source='school', read_only=True)
-    modules = CourseModuleSerializer(many=True, read_only=True)
+    modules = SerializerMethodField()
     enrollment_state = serializers.SerializerMethodField('get_enrollment_state')
 
     class Meta:
@@ -78,21 +84,29 @@ class CourseSerializer(ModelSerializer):
         if not request or not request.user.is_authenticated:
             return None
         user = request.user
-        if user.is_staff or user.is_superuser:
-            files = Files.objects.filter(course=obj)
-        else:
-            files = Files.objects.filter(course=obj, for_teacher=False)
-        return FileSerializer(files, many=True).data
+        if not (user.is_staff or user.is_superuser or self.get_enrollment_state(obj) == 'enrolled'):
+            return []
+        files = [file for file in obj.files.all() if user.is_staff or user.is_superuser or not file.for_teacher]
+        return FileSerializer(files, many=True, context=self.context).data
+
+    def get_modules(self, obj):
+        request = self.context.get('request')
+        can_read = bool(request and request.user.is_authenticated and (
+            request.user.is_staff or request.user.is_superuser or self.get_enrollment_state(obj) == 'enrolled'))
+        data = CourseModuleSerializer(obj.modules.all(), many=True).data
+        for module in data:
+            if not can_read and module['module_type'] not in ['intro', 'program']:
+                module['content'] = ''
+        return data
 
     def get_enrollment_state(self, obj):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return None
-        try:
-            enrollment = Enrollment.objects.get(user=request.user, course=obj)
-            return enrollment.state
-        except Enrollment.DoesNotExist:
-            return None
+        enrollments = getattr(obj, 'user_enrollments', None)
+        if enrollments is None:
+            enrollments = list(Enrollment.objects.filter(user=request.user, course=obj))
+        return enrollments[0].state if enrollments else None
 
 
 class UserEnrollmentSerializer(ModelSerializer):

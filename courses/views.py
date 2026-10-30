@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Prefetch
 from courses.models import Course, Enrollment, School, Teacher
 from courses.serializers import (
     CourseSerializer, UserEnrollmentSerializer, SchoolSerializer,
@@ -30,7 +31,8 @@ class LandingPageAPIView(APIView):
     permission_classes = [AllowAny]
 
     def get(self, request, *args, **kwargs):
-        schools = School.objects.filter(is_active=True).prefetch_related('courses')
+        schools = School.objects.filter(is_active=True).prefetch_related(Prefetch(
+            'courses', queryset=Course.objects.filter(is_popular=True).select_related('school'), to_attr='popular_courses'))
         teachers = Teacher.objects.select_related('school').all()
 
         return Response({
@@ -42,11 +44,19 @@ class LandingPageAPIView(APIView):
             ).data,
         })
 
-class CourseViewSet(viewsets.ModelViewSet):
+class CourseViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [AllowAny]
     serializer_class = CourseSerializer
-    queryset = Course.objects.select_related('school', 'tag').prefetch_related('modules').all()
+    queryset = Course.objects.select_related('school', 'tag').prefetch_related('modules', 'files').all()
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['school', 'school__slug', 'tag', 'is_popular', 'course_type']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if self.request.user.is_authenticated:
+            queryset = queryset.prefetch_related(Prefetch('enrollment_set',
+                queryset=Enrollment.objects.filter(user=self.request.user), to_attr='user_enrollments'))
+        return queryset
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -55,7 +65,9 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def my(self, request):
-        enrollments = Enrollment.objects.filter(user=request.user).select_related('course')
+        enrollments = Enrollment.objects.filter(user=request.user).select_related('course__school', 'course__tag').prefetch_related(
+            'course__files', 'course__modules', Prefetch('course__enrollment_set',
+                queryset=Enrollment.objects.filter(user=request.user), to_attr='user_enrollments'))
         serializer = UserEnrollmentSerializer(
             enrollments, many=True, context={'request': request}
         )
@@ -77,7 +89,7 @@ class EnrollmentViewSet(APIView):
             existing_enrollment = Enrollment.objects.filter(user=user, course=course).first()
             if existing_enrollment:
                 return Response({"result": "Already enrolled", "state": existing_enrollment.state})
-            Enrollment.objects.create(user=user, course=course)
+            Enrollment.objects.create(user=user, course=course, state='enrolled' if course.is_free else 'applied')
             return Response({"result": "Enrolled"})
         except Exception as e:
-            return Response(f"Server Exception: {str(e)}", status=500)
+            return Response({'detail': 'Не удалось записаться на курс.'}, status=500)

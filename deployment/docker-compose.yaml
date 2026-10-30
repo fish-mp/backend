@@ -1,0 +1,39 @@
+version: "3.8"
+services:
+  backend:
+    image: deploy_backend
+    build:
+      context: /home/desai/backend
+    command: ["gunicorn", "service.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]
+    env_file:
+      - /home/desai/deploy/.env.backend
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - /home/desai/backend/data.sqlite3:/usr/src/app/data.sqlite3
+      - /home/desai/backend/media:/usr/src/app/media
+      - /home/desai/backend/static:/usr/src/app/static
+    restart: always
+  frontend:
+    image: deploy_frontend
+    build:
+      context: /home/desai/frontend
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-https://fishkids.ru}
+        VITE_YMAPS_API_KEY: ${VITE_YMAPS_API_KEY:-}
+    ports:
+      - "127.0.0.1:5173:80"
+    restart: always
+  nginx:
+    image: nginx:stable-alpine3.17-slim
+    depends_on: [backend, frontend]
+    restart: always
+    volumes:
+      - /home/desai/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /home/desai/deploy/certs:/etc/nginx/certs:ro
+      - /home/desai/deploy/certbot-www:/var/www/certbot:ro
+      - /home/desai/deploy/letsencrypt:/etc/letsencrypt:rw
+      - /home/desai/backend:/service:ro
+    ports:
+      - "80:80"
+      - "443:443"
