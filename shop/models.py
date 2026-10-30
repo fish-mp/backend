@@ -77,7 +77,7 @@ class Product(models.Model):
 
     @property
     def average_rating(self):
-        avg = self.reviews.aggregate(Avg('score'))['score__avg']
+        avg = self.__dict__.get('_average_rating') if '_average_rating' in self.__dict__ else self.reviews.aggregate(Avg('score'))['score__avg']
         return round(avg, 1) if avg else 0.0
 
 class ProductImage(models.Model):
@@ -173,6 +173,10 @@ class CartItem(models.Model):
     class Meta:
         verbose_name = "Товар в корзине"
         verbose_name_plural = "Товары в корзине"
+        constraints = [
+            models.UniqueConstraint(fields=['cart', 'product'], name='unique_cart_product'),
+            models.CheckConstraint(condition=models.Q(quantity__gte=1), name='cart_quantity_positive'),
+        ]
 
     def __str__(self):
         return f"{self.product.name} ({self.quantity} шт.)"

@@ -23,7 +23,7 @@ class CustomUserAdmin(UserAdmin, ModelAdmin):
     
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        ('Персональная информация', {'fields': ('first_name', 'city', 'age')}),
+        ('Персональная информация', {'fields': ('first_name', 'city', 'age', 'is_email_verified')}),
         ('Права', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups')}),
     )
     

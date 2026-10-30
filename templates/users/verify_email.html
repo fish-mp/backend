@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Подтвердите почту — FishKids</title></head>
+<body style="margin:0;padding:0;background:#f1f5fa;color:#142745;font-family:Arial,Helvetica,sans-serif;">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Ваше знакомство с миром аквариумистики начинается здесь. Подтвердите адрес за один шаг.</div>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f5fa;">
+    <tr><td align="center" style="padding:40px 16px;">
+      <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="width:100%;max-width:560px;">
+        <tr><td style="padding:0 8px 24px;">
+          <span style="font-size:27px;font-weight:800;letter-spacing:-1px;color:#173ded;">Fish<span style="color:#142745;">Kids</span></span>
+          <div style="margin-top:6px;font-size:12px;letter-spacing:1.2px;color:#65758e;">ШКОЛА АКВАРИУМИСТИКИ</div>
+        </td></tr>
+        <tr><td style="background:#ffffff;border:1px solid #e4eaf2;border-radius:24px;overflow:hidden;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+            <tr><td style="background:#173ded;padding:30px 32px;color:#ffffff;">
+              <p style="margin:0 0 10px;font-size:12px;font-weight:bold;letter-spacing:1.4px;color:#d6e0ff;">ДОБРО ПОЖАЛОВАТЬ В FISHKIDS</p>
+              <h1 style="margin:0;font-size:30px;line-height:1.2;font-weight:700;">Большой мир.<br>Один маленький шаг.</h1>
+            </td></tr>
+            <tr><td style="padding:32px;">
+              <p style="margin:0 0 16px;font-size:18px;line-height:1.5;font-weight:bold;">Здравствуйте{% if first_name %}, {{ first_name }}{% endif %}!</p>
+              <p style="margin:0 0 24px;font-size:16px;line-height:1.65;color:#516078;">Подтвердите свою почту, чтобы войти в личный кабинет, выбирать курсы и сохранять любимые товары.</p>
+              <table role="presentation" cellspacing="0" cellpadding="0"><tr><td bgcolor="#173ded" style="border-radius:12px;">
+                <a href="{{ verification_url }}" style="display:inline-block;padding:16px 26px;border:1px solid #173ded;border-radius:12px;color:#ffffff;font-size:16px;font-weight:bold;text-decoration:none;">Подтвердить почту&nbsp; →</a>
+              </td></tr></table>
+              <p style="margin:20px 0 0;font-size:13px;line-height:1.6;color:#77859a;">Ссылка действует {{ expires_hours }} ч. и может быть использована один раз.</p>
+              <div style="height:1px;background:#e9edf4;margin:28px 0;"></div>
+              <p style="margin:0 0 10px;font-size:12px;line-height:1.7;color:#77859a;">Если кнопка не открывается, скопируйте ссылку в браузер:</p>
+              <p style="margin:0;font-size:12px;line-height:1.6;word-break:break-all;"><a href="{{ verification_url }}" style="color:#173ded;">{{ verification_url }}</a></p>
+            </td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:24px 8px;text-align:center;font-size:12px;line-height:1.7;color:#7a8799;">Письмо отправлено на {{ email }}.<br>Если вы не создавали аккаунт, ничего делать не нужно.<br><span style="color:#142745;">С заботой о вашем интересе к природе — FishKids.</span></td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>

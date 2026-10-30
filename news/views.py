@@ -8,6 +8,6 @@ class NewsViewSet(viewsets.ReadOnlyModelViewSet):
     API endpoint для просмотра новостей.
     ReadOnlyModelViewSet предоставляет только операции 'list' и 'retrieve'.
     """
-    queryset = News.objects.all()
+    queryset = News.objects.prefetch_related('photos').all()
     serializer_class = NewsSerializer
     parser_classes = (MultiPartParser, FormParser)

@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status, filters
+from rest_framework import viewsets, status, filters, mixins, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
@@ -11,15 +11,13 @@ from shop.models import (
 from shop.serializers import (
     BrandSerializer, CategorySerializer, ColorSerializer, ProductListSerializer, ProductDetailSerializer,
     CollectionSerializer, ReviewSerializer, FavoriteSerializer,
-    CartSerializer, CartItemSerializer, OrderSerializer
+    CartSerializer, CartItemSerializer, OrderSerializer, CheckoutSerializer
 )
 from rest_framework.views import APIView
 from yookassa import Configuration, Payment
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
-from django.core.validators import validate_email
-from django.core.exceptions import ValidationError
+from django.db.models import F, Avg, Prefetch, Case, When, Value, BooleanField
 from decimal import Decimal
 import re
 import requests
@@ -31,6 +29,11 @@ import json
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def product_queryset():
+    return Product.objects.select_related('brand', 'category__parent', 'color').annotate(
+        _average_rating=Avg('reviews__score')).prefetch_related('images')
 
 
 def configure_yookassa():
@@ -93,20 +96,25 @@ def mark_order_paid(order):
             if item.product is None:
                 continue
             # Атомарное списание остатка на уровне БД
-            Product.objects.filter(pk=item.product.pk).update(
-                stock_quantity=F('stock_quantity') - item.quantity
+            updated = Product.objects.filter(pk=item.product_id, stock_quantity__gte=item.quantity).update(
+                stock_quantity=F('stock_quantity') - item.quantity,
+                is_in_stock=Case(When(stock_quantity__lte=item.quantity, then=Value(False)),
+                                 default=F('is_in_stock'), output_field=BooleanField()),
             )
-            product = Product.objects.get(pk=item.product.pk)
-            if product.stock_quantity <= 0:
-                product.stock_quantity = max(product.stock_quantity, 0)
-                product.is_in_stock = False
-                product.save(update_fields=['stock_quantity', 'is_in_stock'])
+            if not updated:
+                # Payment has already succeeded: preserve that fact for support.
+                # Inventory reservation before payment is still required to
+                # prevent overselling across separate pending orders.
+                logger.error('Paid order %s needs inventory reconciliation: product %s', locked_order.pk, item.product_id)
+
+            cart_items = CartItem.objects.filter(cart__user=locked_order.user, product_id=item.product_id)
+            cart_items.filter(quantity__lte=item.quantity).delete()
+            cart_items.filter(quantity__gt=item.quantity).update(quantity=F('quantity') - item.quantity)
 
         locked_order.status = 'paid'
         locked_order.save(update_fields=['status'])
 
         # Корзину очищаем только после подтверждённой оплаты
-        CartItem.objects.filter(cart__user=locked_order.user).delete()
 
         # Уведомляем продавца только после успешного коммита транзакции
         transaction.on_commit(lambda: notify_seller_order_paid(locked_order))
@@ -132,7 +140,7 @@ class ColorViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = ColorSerializer
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Category.objects.all()
+    queryset = Category.objects.select_related('parent').all()
     serializer_class = CategorySerializer
     
 @method_decorator(csrf_exempt, name='dispatch')
@@ -147,11 +155,14 @@ class YooKassaWebhookView(APIView):
             logger.warning("YooKassa webhook: невалидный JSON")
             return HttpResponse(status=400)
 
+        if not isinstance(event, dict) or not isinstance(event.get('object'), dict):
+            return HttpResponse(status=400)
+
         event_type = event.get('event')
         payment_obj = event.get('object') or {}
         payment_id = payment_obj.get('id')
 
-        if not payment_id:
+        if not isinstance(payment_id, str) or not payment_id or len(payment_id) > 100:
             return HttpResponse(status=200)
 
         order = Order.objects.filter(payment_id=payment_id).first()
@@ -169,7 +180,10 @@ class YooKassaWebhookView(APIView):
             return HttpResponse(status=500)
 
         # Сверяем сумму, чтобы исключить подмену
-        if str(payment.amount.value) != str(order.total_amount):
+        if (Decimal(str(payment.amount.value)) != order.total_amount
+                or payment.amount.currency != 'RUB'
+                or str((payment.metadata or {}).get('order_id')) != str(order.pk)
+                or str(payment.id) != payment_id):
             logger.error(
                 "YooKassa webhook: сумма платежа %s не совпадает с заказом %s",
                 payment_id, order.id,
@@ -184,7 +198,7 @@ class YooKassaWebhookView(APIView):
         return HttpResponse(status=200)
         
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Product.objects.select_related('brand', 'category', 'color').prefetch_related('images').all()
+    queryset = product_queryset().filter(is_available=True)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_class = ProductFilter
     
@@ -197,7 +211,7 @@ class ProductViewSet(viewsets.ReadOnlyModelViewSet):
         return ProductListSerializer
 
 class CollectionViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Collection.objects.prefetch_related('products').all()
+    queryset = Collection.objects.prefetch_related(Prefetch('products', queryset=product_queryset().filter(is_available=True))).all()
     serializer_class = CollectionSerializer
 
 class ReviewViewSet(viewsets.ModelViewSet):
@@ -221,21 +235,22 @@ class FavoriteViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Favorite.objects.filter(user=self.request.user)
+        return Favorite.objects.filter(user=self.request.user).prefetch_related(Prefetch('product', queryset=product_queryset()))
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
-class CartViewSet(viewsets.ModelViewSet):
+class CartViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     serializer_class = CartSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Cart.objects.filter(user=self.request.user)
+        return Cart.objects.filter(user=self.request.user).prefetch_related(
+            Prefetch('items', queryset=CartItem.objects.prefetch_related(Prefetch('product', queryset=product_queryset()))))
 
     def list(self, request, *args, **kwargs):
         cart, created = Cart.objects.get_or_create(user=request.user)
-        serializer = self.get_serializer(cart)
+        serializer = self.get_serializer(self.get_queryset().get(pk=cart.pk))
         return Response(serializer.data)
 
 class CartItemViewSet(viewsets.ModelViewSet):
@@ -243,42 +258,37 @@ class CartItemViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        cart, _ = Cart.objects.get_or_create(user=self.request.user)
-        return CartItem.objects.filter(cart=cart)
+        return CartItem.objects.filter(cart__user=self.request.user).prefetch_related(
+            Prefetch('product', queryset=product_queryset()))
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
         cart, _ = Cart.objects.get_or_create(user=request.user)
-        
-        product_id = serializer.validated_data.get('product_id')
-        quantity_to_add = serializer.validated_data.get('quantity', 1)
-        
-        existing_item = CartItem.objects.filter(cart=cart, product_id=product_id).first()
-        
-        if existing_item:
-            existing_item.quantity += quantity_to_add
-            existing_item.save()
-            return Response(
-                self.get_serializer(existing_item).data, 
-                status=status.HTTP_200_OK
-            )
+        # Serialize additions to the same cart; the DB constraint also protects
+        # against duplicate positions created outside this endpoint.
+        Cart.objects.select_for_update().get(pk=cart.pk)
+        product = serializer.validated_data['product']
+        quantity = serializer.validated_data.get('quantity', 1)
+        existing = CartItem.objects.filter(cart=cart, product=product).first()
+        total_quantity = quantity + (existing.quantity if existing else 0)
+        if total_quantity > product.stock_quantity or total_quantity > 10000:
+            raise serializers.ValidationError({'quantity': 'Недостаточно товара на складе.'})
+        if existing:
+            existing.quantity = total_quantity
+            existing.save(update_fields=['quantity'])
+            item = existing
         else:
-            serializer.save(cart=cart)
-            headers = self.get_success_headers(serializer.data)
-            return Response(
-                serializer.data, 
-                status=status.HTTP_201_CREATED, 
-                headers=headers
-            )
+            item = serializer.save(cart=cart)
+        return Response(self.get_serializer(item).data, status=200 if existing else 201)
 
-class OrderViewSet(viewsets.ModelViewSet):
+class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Order.objects.filter(user=self.request.user)
+        return Order.objects.filter(user=self.request.user).prefetch_related('items__product')
 
     def create(self, request, *args, **kwargs):
         cart, _ = Cart.objects.get_or_create(user=request.user)
@@ -286,45 +296,14 @@ class OrderViewSet(viewsets.ModelViewSet):
         if not cart_items:
             return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # 0. Контактные данные, адрес доставки и согласие с офертой
-        data = request.data
-        email = (data.get('email') or '').strip()
-        phone = (data.get('phone') or '').strip()
-        city = (data.get('city') or '').strip()
-        street = (data.get('street') or '').strip()
-        house = (data.get('house') or '').strip()
-        apartment = (data.get('apartment') or '').strip()
-        postal_code = (data.get('postal_code') or '').strip()
-        offer_accepted = bool(data.get('offer_accepted'))
-        delivery_method = (data.get('delivery_method') or 'pickup').strip()
-        beyond_mkad = bool(data.get('beyond_mkad'))
-
-        required = {
-            'email': email, 'phone': phone,
-        }
-        if delivery_method != 'pickup':
-            required = {
-                'email': email, 'phone': phone,
-                'city': city, 'street': street, 'house': house,
-            }
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            return Response(
-                {"error": "Заполните обязательные поля", "fields": missing},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            validate_email(email)
-        except ValidationError:
-            return Response(
-                {"error": "Некорректный email", "fields": ["email"]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not offer_accepted:
-            return Response(
-                {"error": "Необходимо согласие с публичной офертой", "fields": ["offer_accepted"]},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        checkout = CheckoutSerializer(data=request.data)
+        checkout.is_valid(raise_exception=True)
+        data = checkout.validated_data
+        email, phone = data['email'], data['phone']
+        city, street, house = data['city'], data['street'], data['house']
+        apartment, postal_code = data['apartment'], data['postal_code']
+        offer_accepted = data['offer_accepted']
+        delivery_method, beyond_mkad = data['delivery_method'], data['beyond_mkad']
 
         # 1. Проверяем доступность и остатки до создания заказа
         for item in cart_items:
@@ -428,8 +407,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             })
         except Exception:
             logger.exception("Не удалось создать платёж ЮKassa для заказа %s", order.id)
-            # Откатываем заказ, чтобы не копить непроведённые «pending»
-            order.delete()
+            # A timeout may happen after the provider accepted the payment.
+            # Preserve the order for reconciliation instead of losing its items.
             return Response(
                 {"error": "Не удалось создать платёж. Попробуйте позже."},
                 status=status.HTTP_502_BAD_GATEWAY,

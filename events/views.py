@@ -26,7 +26,7 @@ class EventViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
-        queryset = Event.objects.all()
+        queryset = Event.objects.prefetch_related('photos', 'certificates').all()
         status = self.request.query_params.get('status', None)
         
         if status == 'upcoming':

@@ -2,12 +2,15 @@ import os
 from datetime import timedelta
 from decouple import config  # type: ignore
 from pathlib import Path
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY: str = config(
-    "DJANGO_SECRET_KEY", default="django-default-secret-key", cast=str
+    "DJANGO_SECRET_KEY", cast=str
 )
+if len(SECRET_KEY) < 50 or SECRET_KEY == 'django-default-secret-key':
+    raise ImproperlyConfigured('Set a random DJANGO_SECRET_KEY of at least 50 characters.')
 
 DEBUG: bool = config("DEBUG", default=False, cast=bool)
 
@@ -68,19 +71,17 @@ MIDDLEWARE = [
 
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticatedOrReadOnly",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        # JWT первым: для SPA-запросов с Bearer не доходит до SessionAuthentication,
-        # которая на небезопасных методах требует CSRF-токен (иначе 403 "CSRF Failed").
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
+        "users.authentication.VerifiedJWTAuthentication",
     ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
-        "rest_framework.renderers.BrowsableAPIRenderer",
-        "rest_framework.renderers.AdminRenderer",
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_RATES": {"auth": "30/min", "email": "5/hour"},
+    "NUM_PROXIES": 1,
 }
 
 ROOT_URLCONF = "service.urls"
@@ -88,7 +89,7 @@ ROOT_URLCONF = "service.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR, "templates"],
+        "DIRS": [BASE_DIR / 'templates'],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -148,14 +149,14 @@ STATIC_ROOT = os.path.join(BASE_DIR, "static/")
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(days=1488),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=5),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
     "UPDATE_LAST_LOGIN": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
-    "VERIFYING_KEY": True,
+    "VERIFYING_KEY": "",
     "AUDIENCE": None,
     "ISSUER": None,
     "JWK_URL": None,
@@ -174,9 +175,6 @@ default_user_authentication_rule",
     "SLIDING_TOKEN_LIFETIME": timedelta(minutes=5),
     "SLIDING_TOKEN_REFRESH_LIFETIME": timedelta(days=1),
 }
-
-if DEBUG:
-    SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"] = timedelta(weeks=2)
 
 ASGI_APPLICATION = "service.asgi.application"
 
@@ -199,10 +197,11 @@ ALLOWED_HOSTS = [
     "localhost",
     "0.0.0.0",
     "fish-mp.miv-dev.ru",
-    "fish-mp.netlify.app"
+    "fish-mp.netlify.app",
+    "fishkids.ru",
 ]
 
-CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_CREDENTIALS = False
 
 # Разрешаем любые источники только в режиме разработки.
 # В проде работает строгий белый список CORS_ALLOWED_ORIGINS выше.
@@ -212,3 +211,17 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+FRONTEND_URL = config('FRONTEND_URL', default='https://fishkids.ru').rstrip('/')
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_TIMEOUT = 10
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='FishKids <noreply@fishkids.ru>')
+EMAIL_VERIFICATION_TIMEOUT = 24 * 60 * 60
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG

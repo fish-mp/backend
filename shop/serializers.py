@@ -45,10 +45,9 @@ class ProductListSerializer(serializers.ModelSerializer):
 
     def get_main_image(self, obj):
         # Берем первую картинку или помеченную как is_main
-        main = obj.images.filter(is_main=True).first()
-        if not main:
-            main = obj.images.first()
-        return ProductImageSerializer(main).data if main else None
+        images = list(obj.images.all())
+        main = next((image for image in images if image.is_main), images[0] if images else None)
+        return ProductImageSerializer(main, context=self.context).data if main else None
 
 class ProductDetailSerializer(serializers.ModelSerializer):
     """
@@ -72,7 +71,7 @@ class CollectionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ReviewSerializer(serializers.ModelSerializer):
-    user = serializers.StringRelatedField(read_only=True) 
+    user = serializers.CharField(source='user.first_name', read_only=True)
     
     product_name = serializers.CharField(source='product.name', read_only=True)
     
@@ -88,7 +87,17 @@ class ReviewSerializer(serializers.ModelSerializer):
 
 class FavoriteSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True) 
-    product_id = serializers.UUIDField(write_only=True)
+    product_id = serializers.PrimaryKeyRelatedField(source='product', queryset=Product.objects.filter(is_available=True), write_only=True)
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        product = attrs.get('product')
+        existing = Favorite.objects.filter(user=user, product=product)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError({'product_id': 'Товар уже в избранном.'})
+        return attrs
 
     class Meta:
         model = Favorite
@@ -97,7 +106,17 @@ class FavoriteSerializer(serializers.ModelSerializer):
 
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
-    product_id = serializers.UUIDField(write_only=True)
+    product_id = serializers.PrimaryKeyRelatedField(source='product', queryset=Product.objects.filter(is_available=True), write_only=True)
+    quantity = serializers.IntegerField(min_value=1, max_value=10000, default=1)
+
+    def validate(self, attrs):
+        product = attrs.get('product') or (self.instance.product if self.instance else None)
+        if self.instance and product.pk != self.instance.product_id:
+            raise serializers.ValidationError({'product_id': 'Для другого товара создайте новую позицию корзины.'})
+        quantity = attrs.get('quantity', self.instance.quantity if self.instance else 1)
+        if not product or not product.is_available or not product.is_in_stock or quantity > product.stock_quantity:
+            raise serializers.ValidationError({'quantity': 'Товар недоступен или запрошено больше, чем есть на складе.'})
+        return attrs
 
     class Meta:
         model = CartItem
@@ -133,4 +152,26 @@ class OrderSerializer(serializers.ModelSerializer):
             'email', 'phone', 'city', 'street', 'house', 'apartment',
             'postal_code', 'offer_accepted',
         ]
-        read_only_fields = ['user', 'total_amount', 'created_at']
+        read_only_fields = fields
+
+
+class CheckoutSerializer(serializers.Serializer):
+    email = serializers.EmailField(max_length=254)
+    phone = serializers.RegexField(r'^\+?[\d\s()\-]{10,20}$', max_length=20)
+    delivery_method = serializers.ChoiceField(choices=['pickup', 'delivery'], default='pickup')
+    beyond_mkad = serializers.BooleanField(default=False)
+    offer_accepted = serializers.BooleanField()
+    city = serializers.CharField(max_length=100, allow_blank=True, default='')
+    street = serializers.CharField(max_length=150, allow_blank=True, default='')
+    house = serializers.CharField(max_length=30, allow_blank=True, default='')
+    apartment = serializers.CharField(max_length=30, allow_blank=True, default='')
+    postal_code = serializers.CharField(max_length=20, allow_blank=True, default='')
+
+    def validate(self, attrs):
+        if not attrs['offer_accepted']:
+            raise serializers.ValidationError({'offer_accepted': 'Необходимо согласие с публичной офертой.'})
+        if attrs['delivery_method'] == 'delivery':
+            missing = {field: 'Обязательное поле для доставки.' for field in ['city', 'street', 'house'] if not attrs[field]}
+            if missing:
+                raise serializers.ValidationError(missing)
+        return attrs
