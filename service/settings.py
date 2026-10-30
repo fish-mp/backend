@@ -231,6 +231,7 @@ EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
 EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
 EMAIL_TIMEOUT = 10
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='FishKids <noreply@fishkids.ru>')
+DEFAULT_REPLY_TO_EMAIL = config('DEFAULT_REPLY_TO_EMAIL', default='')
 EMAIL_VERIFICATION_TIMEOUT = 24 * 60 * 60
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG

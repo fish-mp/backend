@@ -24,11 +24,13 @@ class AuthenticationTests(APITestCase):
     def login(self):
         return self.client.post('/api/token/', {'email': self.payload['email'], 'password': self.payload['password']})
 
+    @override_settings(DEFAULT_REPLY_TO_EMAIL='info@inco-edu.ru')
     def test_registration_requires_one_time_email_confirmation(self):
         self.assertEqual(self.client.post('/api/users/register/', self.payload).status_code, 201)
         self.assertFalse(CustomUser.objects.get().is_email_verified)
         self.assertEqual(len(mail.outbox), 1)
         self.assertTrue(mail.outbox[0].alternatives)
+        self.assertEqual(mail.outbox[0].reply_to, ['info@inco-edu.ru'])
         self.assertEqual(self.login().status_code, 401)
         token = self.token()
         self.assertEqual(self.client.post('/api/users/verify-email/', {'token': token}).status_code, 200)

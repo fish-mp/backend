@@ -22,6 +22,7 @@ def send_verification_email(user):
         body=render_to_string('users/verify_email.txt', context),
         from_email=settings.DEFAULT_FROM_EMAIL,
         to=[user.email],
+        reply_to=[settings.DEFAULT_REPLY_TO_EMAIL] if settings.DEFAULT_REPLY_TO_EMAIL else None,
     )
     message.attach_alternative(render_to_string('users/verify_email.html', context), 'text/html')
     message.send(fail_silently=False)
