@@ -1,10 +1,16 @@
 from rest_framework import serializers
 from rest_framework.serializers import ModelSerializer
 from rest_framework.fields import SerializerMethodField
+from courses.file_access import file_url
 from courses.models import Course, Enrollment, Files, Tag, School, Teacher, CourseModule
 
 
 class FileSerializer(ModelSerializer):
+    file = SerializerMethodField()
+
+    def get_file(self, obj):
+        return file_url(obj, self.context.get('request'))
+
     class Meta:
         model = Files
         fields = '__all__'
@@ -81,7 +87,7 @@ class CourseSerializer(ModelSerializer):
         if not (user.is_staff or user.is_superuser or self.get_enrollment_state(obj) == 'enrolled'):
             return []
         files = [file for file in obj.files.all() if user.is_staff or user.is_superuser or not file.for_teacher]
-        return FileSerializer(files, many=True).data
+        return FileSerializer(files, many=True, context=self.context).data
 
     def get_modules(self, obj):
         request = self.context.get('request')

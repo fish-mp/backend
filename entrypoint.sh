@@ -1,7 +1,7 @@
 #!/bin/sh
+set -eu
 
-# python manage.py flush --no-input
-python manage.py migrate
+python manage.py migrate --noinput
 python manage.py collectstatic --no-input --clear
 
 exec "$@"

@@ -181,6 +181,9 @@ ASGI_APPLICATION = "service.asgi.application"
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:8000",
     "https://fishkids.ru",
+    "https://www.fishkids.ru",
+    "https://inco-edu.ru",
+    "https://www.inco-edu.ru",
 
 ]
 
@@ -188,6 +191,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:8000",
     "http://localhost:5173",
     "https://fishkids.ru",
+    "https://www.fishkids.ru",
+    "https://inco-edu.ru",
+    "https://www.inco-edu.ru",
     "https://fish-mp.miv-dev.ru",
     "https://fish-mp.netlify.app",
 ]
@@ -199,6 +205,9 @@ ALLOWED_HOSTS = [
     "fish-mp.miv-dev.ru",
     "fish-mp.netlify.app",
     "fishkids.ru",
+    "www.fishkids.ru",
+    "inco-edu.ru",
+    "www.inco-edu.ru",
 ]
 
 CORS_ALLOW_CREDENTIALS = False
@@ -225,3 +234,6 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='FishKids <noreply@fis
 EMAIL_VERIFICATION_TIMEOUT = 24 * 60 * 60
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
+
+COURSE_FILE_URL_MAX_AGE = 3600
+COURSE_FILES_USE_X_ACCEL_REDIRECT = config('COURSE_FILES_USE_X_ACCEL_REDIRECT', default=False, cast=bool)

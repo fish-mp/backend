@@ -24,6 +24,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from shop.views import YooKassaWebhookView
 from courses.views import SchoolViewSet, TeacherViewSet, LandingPageAPIView
+from courses.file_access import CourseFileView
 from users.views import LoginView, RefreshView, VerifyView
 
 schema_view = get_schema_view(
@@ -38,6 +39,8 @@ school_router.register(r'teachers', TeacherViewSet, basename='teachers')
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('api/course-files/<int:pk>/<str:name>', CourseFileView.as_view(), name='course-file-download'),
+    path('media/files/<path:filename>', CourseFileView.as_view(), name='legacy-course-file'),
     path('api/token/', LoginView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', RefreshView.as_view(), name='token_refresh'),
     path('api/token/verify/', VerifyView.as_view(), name='token_verify'),
