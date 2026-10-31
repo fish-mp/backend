@@ -71,7 +71,10 @@ class CollectionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ReviewSerializer(serializers.ModelSerializer):
-    user = serializers.CharField(source='user.first_name', read_only=True)
+    user = serializers.SerializerMethodField()
+
+    def get_user(self, obj):
+        return 'Покупатель'
     
     product_name = serializers.CharField(source='product.name', read_only=True)
     

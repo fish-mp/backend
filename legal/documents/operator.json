@@ -1,14 +1,16 @@
 {
-  "status": "draft",
-  "name": "{{ПОЛНОЕ_НАИМЕНОВАНИЕ_ОПЕРАТОРА}}",
-  "legal_address": "{{ЮРИДИЧЕСКИЙ_АДРЕС}}",
-  "inn": "{{ИНН}}",
-  "ogrn": "{{ОГРН_ИЛИ_ОГРНИП}}",
-  "contact_email": "{{ПОЧТА_ПО_ПЕРСОНАЛЬНЫМ_ДАННЫМ}}",
-  "data_location": "{{ХОСТЕР_И_МЕСТО_БАЗЫ_В_РОССИИ}}",
+  "status": "published",
+  "name": "ИП Мирзагасанов Сахил Башарат Оглы",
+  "legal_address": "г. Москва, улица Дегунинская, дом 17",
+  "inn": "621302547601",
+  "ogrn": "318623400010967",
+  "contact_email": "info@inco-edu.ru",
+  "data_location": "Зарубежный тестовый сервер; планируется перенос основной инфраструктуры в РФ",
   "consent_purposes": [
     "registration",
     "checkout",
     "enrollment"
-  ]
+  ],
+  "source_document": "Политика от 15 мая 2026 года",
+  "source_sha256": "d8efce178259551e33cc81e7afe1d2397bc271e9f7d21f283047d1e2e74b428a"
 }

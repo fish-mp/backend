@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from rest_framework.exceptions import APIException, ValidationError
 
-REQUIRED = ('privacy-policy', 'personal-data-consent', 'cookies-policy', 'public-offer', 'returns-policy')
+REQUIRED = ('privacy-policy', 'personal-data-consent', 'cookies-policy')
 
 
 def catalog(preview=False):
