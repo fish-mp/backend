@@ -75,9 +75,13 @@ class ShopSecurityTests(APITestCase):
         self.assertEqual(len(response.data), 9)
 
     def test_public_review_does_not_expose_email(self):
+        self.customer.first_name = 'PrivateBuyerName'
+        self.customer.save(update_fields=['first_name'])
         Review.objects.create(user=self.customer, product=self.product, score=5)
         self.client.force_authenticate(None)
-        self.assertNotIn(self.customer.email, str(self.client.get('/api/reviews/').data))
+        response = str(self.client.get('/api/reviews/').data)
+        self.assertNotIn(self.customer.email, response)
+        self.assertNotIn(self.customer.first_name, response)
 
     def test_payment_is_idempotent_and_preserves_new_cart_items(self):
         OrderItem.objects.create(order=self.order, product=self.product, price=100, quantity=1)

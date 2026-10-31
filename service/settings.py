@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     # "django.contrib.postgres",
     # Apps
     "users.apps.UsersConfig",
+    "legal.apps.LegalConfig",
     'events.apps.EventsConfig',
     'news.apps.NewsConfig',
     'courses.apps.CoursesConfig',
@@ -119,6 +120,7 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': 'data.sqlite3',
+        'OPTIONS': {'timeout': 20},
     }
 }
 
@@ -238,3 +240,7 @@ CSRF_COOKIE_SECURE = not DEBUG
 
 COURSE_FILE_URL_MAX_AGE = 3600
 COURSE_FILES_USE_X_ACCEL_REDIRECT = config('COURSE_FILES_USE_X_ACCEL_REDIRECT', default=False, cast=bool)
+
+# Drafts are prepared in legal/documents and cannot be accepted by visitors.
+LEGAL_DOCUMENTS_ENABLED = config('LEGAL_DOCUMENTS_ENABLED', default=False, cast=bool)
+LEGAL_DOCUMENTS_DIR = BASE_DIR / 'legal' / 'documents'

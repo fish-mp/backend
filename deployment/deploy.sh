@@ -62,7 +62,6 @@ compose stop backend
 git -C "$backend" merge --ff-only "$back_sha"
 git -C "$frontend" merge --ff-only "$front_sha"
 cat "$backend/deployment/nginx.conf" > "$deploy/nginx.conf"
-docker exec deploy_nginx_1 nginx -t
 build_compose run --rm --no-deps --entrypoint python backend manage.py migrate --noinput
 build_compose run --rm --no-deps --entrypoint python backend manage.py collectstatic --noinput
 compose up -d --no-deps --no-build backend frontend
@@ -74,6 +73,7 @@ for attempt in $(seq 1 30); do
   [[ "$attempt" != 30 ]] || { echo 'Health check failed'; exit 1; }
   sleep 2
 done
+docker exec deploy_nginx_1 nginx -t
 docker exec deploy_nginx_1 nginx -s reload
 for domain in fishkids.ru www.fishkids.ru inco-edu.ru www.inco-edu.ru; do
   curl --fail --silent --max-time 10 "https://$domain/api/schools/" >/dev/null

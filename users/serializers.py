@@ -2,13 +2,15 @@ from rest_framework import serializers
 from users.models import CustomUser
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from legal.catalog import validate_consent, record_consent
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
+    privacy_consent = serializers.JSONField(required=False, write_only=True)
     password = serializers.CharField(write_only=True, trim_whitespace=False, max_length=128)
     
     class Meta:
         model = CustomUser
-        fields = ('email', 'password', 'first_name', 'city', 'age')
+        fields = ('email', 'password', 'first_name', 'city', 'age', 'privacy_consent')
         extra_kwargs = {
             'password': {'write_only': True},
             'first_name': {'required': True, 'allow_blank': False},
@@ -28,8 +30,9 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        validate_consent(attrs.get('privacy_consent'), 'registration')
         try:
-            validate_password(attrs['password'], CustomUser(**attrs))
+            validate_password(attrs['password'], CustomUser(**{k:v for k,v in attrs.items() if k != 'privacy_consent'}))
         except ValidationError as exc:
             raise serializers.ValidationError({'password': exc.messages})
         return attrs
@@ -54,4 +57,5 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             city=validated_data.get('city', ''),
             age=validated_data.get('age')
         )
+        record_consent(user, 'registration', validated_data.get('privacy_consent'), user.pk)
         return user

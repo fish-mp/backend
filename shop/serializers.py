@@ -71,7 +71,10 @@ class CollectionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class ReviewSerializer(serializers.ModelSerializer):
-    user = serializers.CharField(source='user.first_name', read_only=True)
+    user = serializers.SerializerMethodField()
+
+    def get_user(self, obj):
+        return 'Покупатель'
     
     product_name = serializers.CharField(source='product.name', read_only=True)
     
@@ -135,7 +138,10 @@ class CartSerializer(serializers.ModelSerializer):
         return sum(item.total_price for item in obj.items.all())
 
 class OrderItemSerializer(serializers.ModelSerializer):
-    product_name = serializers.CharField(source='product.name', read_only=True)
+    product_name = serializers.SerializerMethodField()
+
+    def get_product_name(self, obj):
+        return obj.product_name or (obj.product.name if obj.product else 'Удалённый товар')
     
     class Meta:
         model = OrderItem
@@ -150,12 +156,13 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'status', 'total_amount', 'created_at', 'items',
             'email', 'phone', 'city', 'street', 'house', 'apartment',
-            'postal_code', 'offer_accepted',
+            'postal_code', 'offer_accepted', 'confirmation_url', 'delivery_method', 'delivery_cost', 'beyond_mkad',
         ]
         read_only_fields = fields
 
 
 class CheckoutSerializer(serializers.Serializer):
+    privacy_consent = serializers.JSONField(required=False, write_only=True)
     email = serializers.EmailField(max_length=254)
     phone = serializers.RegexField(r'^\+?[\d\s()\-]{10,20}$', max_length=20)
     delivery_method = serializers.ChoiceField(choices=['pickup', 'delivery'], default='pickup')
@@ -168,6 +175,8 @@ class CheckoutSerializer(serializers.Serializer):
     postal_code = serializers.CharField(max_length=20, allow_blank=True, default='')
 
     def validate(self, attrs):
+        from legal.catalog import validate_consent
+        validate_consent(attrs.get('privacy_consent'), 'checkout')
         if not attrs['offer_accepted']:
             raise serializers.ValidationError({'offer_accepted': 'Необходимо согласие с публичной офертой.'})
         if attrs['delivery_method'] == 'delivery':

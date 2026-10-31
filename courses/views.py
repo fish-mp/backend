@@ -1,10 +1,12 @@
 from rest_framework.views import APIView
-from rest_framework import viewsets
+from rest_framework import viewsets, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Prefetch
+from django.db import transaction
+from legal.catalog import validate_consent, record_consent
 from courses.models import Course, Enrollment, School, Teacher
 from courses.serializers import (
     CourseSerializer, UserEnrollmentSerializer, SchoolSerializer,
@@ -85,11 +87,15 @@ class EnrollmentViewSet(APIView):
             course = Course.objects.get(pk=course_id)
         except Course.DoesNotExist:
             return Response("Course not Found", status=404)
+        data = serializers.DictField().run_validation(request.data)
+        validate_consent(data.get('privacy_consent'), 'enrollment')
         try:
             existing_enrollment = Enrollment.objects.filter(user=user, course=course).first()
             if existing_enrollment:
                 return Response({"result": "Already enrolled", "state": existing_enrollment.state})
-            Enrollment.objects.create(user=user, course=course, state='enrolled' if course.is_free else 'applied')
+            with transaction.atomic():
+                enrollment = Enrollment.objects.create(user=user, course=course, state='enrolled' if course.is_free else 'applied')
+                record_consent(user, 'enrollment', data.get('privacy_consent'), enrollment.pk)
             return Response({"result": "Enrolled"})
         except Exception as e:
             return Response({'detail': 'Не удалось записаться на курс.'}, status=500)

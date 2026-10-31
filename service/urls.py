@@ -37,7 +37,10 @@ school_router = SimpleRouter()
 school_router.register(r'schools', SchoolViewSet, basename='schools')
 school_router.register(r'teachers', TeacherViewSet, basename='teachers')
 
+from legal.views import LegalDocumentsView
+
 urlpatterns = [
+    path('api/legal/documents/', LegalDocumentsView.as_view(), name='legal-documents'),
     path('admin/', admin.site.urls),
     path('api/course-files/<int:pk>/<str:name>', CourseFileView.as_view(), name='course-file-download'),
     path('media/files/<path:filename>', CourseFileView.as_view(), name='legacy-course-file'),

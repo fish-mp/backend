@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django import forms
 from unfold.admin import ModelAdmin, TabularInline
 
 from .models import (
@@ -11,10 +12,14 @@ class ProductImageInline(TabularInline):
     model = ProductImage
     extra = 1
 
-class OrderItemInline(TabularInline):                                                                              
-      model = OrderItem
-      extra = 0
+class OrderItemInline(TabularInline):
+    model = OrderItem
+    extra = 0
+    readonly_fields = ('product', 'product_name', 'price', 'quantity')
+    can_delete = False
 
+    def has_add_permission(self, request, obj=None):
+        return False
 
 
 class CartItemInline(TabularInline):
@@ -70,13 +75,44 @@ class ReviewAdmin(ModelAdmin):
     list_filter = ('score', 'created_at')
     search_fields = ('product__name', 'user__email')
 
+class OrderAdminForm(forms.ModelForm):
+    class Meta:
+        model = Order
+        fields = '__all__'
+
+    def clean_status(self):
+        status = self.cleaned_data['status']
+        order = self.instance
+        if order.pk and (order.payment_id or order.payment_key):
+            if order.status in ('pending', 'cancelled') and status != order.status:
+                raise forms.ValidationError('Статус оплаты обновляется по данным ЮKassa.')
+            if order.status in ('paid', 'processing', 'shipped', 'delivered') and status not in ('paid', 'processing', 'shipped', 'delivered'):
+                raise forms.ValidationError('Оплаченный заказ нельзя повторно перевести в ожидание оплаты или отменить без отдельного возврата.')
+        return status
+
+
 @admin.register(Order)
 class OrderAdmin(ModelAdmin):
-    list_display = ('id', 'user', 'status', 'total_amount', 'phone', 'city', 'created_at')
-    list_filter = ('status', 'created_at')
+    form = OrderAdminForm
+    list_display = ('id', 'user', 'status', 'stock_reserved', 'payment_review_required', 'total_amount', 'phone', 'city', 'created_at')
+    list_filter = ('status', 'payment_review_required', 'stock_reserved', 'created_at')
     search_fields = ('user__email', 'id', 'email', 'phone', 'city')
     inlines = [OrderItemInline]
-    readonly_fields = ('created_at',)
+    readonly_fields = ('created_at', 'user', 'total_amount', 'payment_id', 'checkout_key',
+        'payment_key', 'payment_started_at', 'payment_last_checked_at', 'confirmation_url',
+        'stock_reserved', 'payment_review_required', 'delivery_method', 'delivery_cost', 'beyond_mkad')
+    exclude = ('payment_request', 'checkout_fingerprint')
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj and obj.status in ('pending', 'cancelled') and (obj.payment_id or obj.payment_key):
+            return (*self.readonly_fields, 'status')
+        return self.readonly_fields
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 @admin.register(Cart)
 class CartAdmin(ModelAdmin):

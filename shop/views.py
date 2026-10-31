@@ -14,9 +14,11 @@ from shop.serializers import (
     CartSerializer, CartItemSerializer, OrderSerializer, CheckoutSerializer
 )
 from rest_framework.views import APIView
-from yookassa import Configuration, Payment
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, OperationalError
+from django.utils import timezone
+import hashlib
+import uuid
 from django.db.models import F, Avg, Prefetch, Case, When, Value, BooleanField
 from decimal import Decimal
 import re
@@ -34,12 +36,6 @@ logger = logging.getLogger(__name__)
 def product_queryset():
     return Product.objects.select_related('brand', 'category__parent', 'color').annotate(
         _average_rating=Avg('reviews__score')).prefetch_related('images')
-
-
-def configure_yookassa():
-    """Однократно настраивает реквизиты ЮKassa из настроек проекта."""
-    Configuration.account_id = settings.YOOKASSA_SHOP_ID
-    Configuration.secret_key = settings.YOOKASSA_SECRET_KEY
 
 
 def notify_seller_order_paid(order):
@@ -62,14 +58,7 @@ def notify_seller_order_paid(order):
             name = item.product.name if item.product else "удалённый товар"
             lines.append(f"• {name} × {item.quantity} — {item.price} ₽")
 
-        address = ", ".join(filter(None, [
-            order.postal_code, order.city, order.street,
-            f"д. {order.house}" if order.house else "",
-            f"кв. {order.apartment}" if order.apartment else "",
-        ]))
-        lines += ["", f"Покупатель: {order.email}", f"Телефон: {order.phone}"]
-        if address:
-            lines.append(f"Адрес: {address}")
+        lines += ["", f"Открыть заказ: {settings.FRONTEND_URL}/admin/shop/order/{order.pk}/change/"]
 
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -80,45 +69,10 @@ def notify_seller_order_paid(order):
         logger.exception("Не удалось отправить Telegram-уведомление о заказе %s", order.id)
 
 
-def mark_order_paid(order):
-    """
-    Идемпотентно переводит заказ в статус 'paid', списывает остатки со склада
-    и очищает корзину пользователя. Безопасно вызывать повторно: при повторном
-    вызове заказ уже не в статусе 'pending', поэтому ничего не произойдёт.
-    """
-    with transaction.atomic():
-        # Блокируем заказ, чтобы параллельные вызовы вебхука не списали склад дважды
-        locked_order = Order.objects.select_for_update().get(pk=order.pk)
-        if locked_order.status != 'pending':
-            return False
-
-        for item in locked_order.items.select_related('product').all():
-            if item.product is None:
-                continue
-            # Атомарное списание остатка на уровне БД
-            updated = Product.objects.filter(pk=item.product_id, stock_quantity__gte=item.quantity).update(
-                stock_quantity=F('stock_quantity') - item.quantity,
-                is_in_stock=Case(When(stock_quantity__lte=item.quantity, then=Value(False)),
-                                 default=F('is_in_stock'), output_field=BooleanField()),
-            )
-            if not updated:
-                # Payment has already succeeded: preserve that fact for support.
-                # Inventory reservation before payment is still required to
-                # prevent overselling across separate pending orders.
-                logger.error('Paid order %s needs inventory reconciliation: product %s', locked_order.pk, item.product_id)
-
-            cart_items = CartItem.objects.filter(cart__user=locked_order.user, product_id=item.product_id)
-            cart_items.filter(quantity__lte=item.quantity).delete()
-            cart_items.filter(quantity__gt=item.quantity).update(quantity=F('quantity') - item.quantity)
-
-        locked_order.status = 'paid'
-        locked_order.save(update_fields=['status'])
-
-        # Корзину очищаем только после подтверждённой оплаты
-
-        # Уведомляем продавца только после успешного коммита транзакции
-        transaction.on_commit(lambda: notify_seller_order_paid(locked_order))
-    return True
+from shop.payments import (Payment, configure_yookassa, mark_order_paid, sync_payment,
+                           apply_payment, reserve_items, PaymentMismatch)
+from users.throttles import AuthRateThrottle
+from legal.catalog import record_consent
 
 
 class IsOwnerOrReadOnly(IsAuthenticatedOrReadOnly):
@@ -179,24 +133,13 @@ class YooKassaWebhookView(APIView):
             # 500 -> ЮKassa повторит доставку позже
             return HttpResponse(status=500)
 
-        # Сверяем сумму, чтобы исключить подмену
-        if (Decimal(str(payment.amount.value)) != order.total_amount
-                or payment.amount.currency != 'RUB'
-                or str((payment.metadata or {}).get('order_id')) != str(order.pk)
-                or str(payment.id) != payment_id):
-            logger.error(
-                "YooKassa webhook: сумма платежа %s не совпадает с заказом %s",
-                payment_id, order.id,
-            )
-            return HttpResponse(status=200)
-
-        if event_type == 'payment.succeeded' and payment.status == 'succeeded':
-            mark_order_paid(order)
-        elif event_type == 'payment.canceled' and payment.status == 'canceled':
-            Order.objects.filter(pk=order.pk, status='pending').update(status='cancelled')
-
+        try:
+            apply_payment(order, payment)
+        except PaymentMismatch:
+            Order.objects.filter(pk=order.pk).update(payment_review_required=True)
+            logger.error("Provider identity mismatch for order %s", order.pk)
         return HttpResponse(status=200)
-        
+
 class ProductViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = product_queryset().filter(is_available=True)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -290,139 +233,93 @@ class OrderViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Ge
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).prefetch_related('items__product')
 
-    def create(self, request, *args, **kwargs):
-        cart, _ = Cart.objects.get_or_create(user=request.user)
-        cart_items = list(cart.items.select_related('product').all())
-        if not cart_items:
-            return Response({"error": "Корзина пуста"}, status=status.HTTP_400_BAD_REQUEST)
+    def payment_response(self, order, created=False):
+        try:
+            sync_payment(order)
+        except Exception as exc:
+            # No request payload, email, address or provider credentials in logs.
+            logger.warning("Payment check failed for order %s (%s)", order.pk, type(exc).__name__)
+            return Response({'error': 'Платёж проверяется. Не создавайте новый заказ — повторите проверку этого заказа.',
+                             'order_id': order.pk, 'status': 'pending'}, status=502)
+        return Response({'order_id': order.pk, 'status': order.status,
+                         'payment_review_required': order.payment_review_required,
+                         'confirmation_url': order.confirmation_url if order.status == 'pending' and not order.payment_review_required else None},
+                        status=201 if created else 200)
 
+    @action(detail=True, methods=['post'], throttle_classes=[AuthRateThrottle])
+    def payment(self, request, pk=None):
+        return self.payment_response(self.get_object())
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return self._create_checkout(request)
+        except OperationalError as exc:
+            if 'locked' not in str(exc).lower():
+                raise
+            return Response({'error': 'Заказ обрабатывается параллельно. Повторите запрос с тем же ключом.'}, status=503)
+
+    def _create_checkout(self, request):
         checkout = CheckoutSerializer(data=request.data)
         checkout.is_valid(raise_exception=True)
         data = checkout.validated_data
-        email, phone = data['email'], data['phone']
-        city, street, house = data['city'], data['street'], data['house']
-        apartment, postal_code = data['apartment'], data['postal_code']
-        offer_accepted = data['offer_accepted']
-        delivery_method, beyond_mkad = data['delivery_method'], data['beyond_mkad']
-
-        # 1. Проверяем доступность и остатки до создания заказа
-        for item in cart_items:
-            product = item.product
-            if not product.is_available:
-                return Response(
-                    {"error": f"Товар «{product.name}» недоступен для заказа"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if product.stock_quantity < item.quantity:
-                return Response(
-                    {"error": f"Недостаточно товара «{product.name}» на складе"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        items_total = sum(item.product.price * item.quantity for item in cart_items)
-        delivery_cost = Decimal('0')
-        # Доставка бесплатна при заказе от 10 000 ₽; иначе 1500 ₽ (в МКАД) или 3000 ₽ (за МКАД)
-        if delivery_method == 'delivery' and items_total < Decimal('10000'):
-            delivery_cost = Decimal('3000') if beyond_mkad else Decimal('1500')
-        total_amount = (items_total + delivery_cost).quantize(Decimal('0.01'))
-
-        # 2. Создаём заказ и позиции атомарно: при сбое не останется «висячих» записей
-        with transaction.atomic():
-            order = Order.objects.create(
-                user=request.user,
-                status='pending',
-                total_amount=total_amount,
-                email=email,
-                phone=phone,
-                city=city,
-                street=street,
-                house=house,
-                apartment=apartment,
-                postal_code=postal_code,
-                offer_accepted=offer_accepted,
-            )
-            OrderItem.objects.bulk_create([
-                OrderItem(
-                    order=order,
-                    product=item.product,
-                    price=item.product.price,
-                    quantity=item.quantity,
-                )
-                for item in cart_items
-            ])
-
-        # 3. Создаём платёж в ЮKassa (с чеком по 54-ФЗ)
-        configure_yookassa()
-        receipt_items = [
-            {
-                "description": item.product.name[:128],
-                "quantity": str(item.quantity),
-                "amount": {
-                    "value": str(item.product.price),
-                    "currency": "RUB",
-                },
-                "vat_code": settings.YOOKASSA_VAT_CODE,
-                "payment_subject": "commodity",
-                "payment_mode": "full_payment",
-            }
-            for item in cart_items
-        ]
-        # Доставка — отдельная позиция чека, иначе сумма позиций не сойдётся с amount
-        if delivery_cost > 0:
-            receipt_items.append({
-                "description": "Доставка",
-                "quantity": "1",
-                "amount": {
-                    "value": str(delivery_cost),
-                    "currency": "RUB",
-                },
-                "vat_code": settings.YOOKASSA_VAT_CODE,
-                "payment_subject": "service",
-                "payment_mode": "full_payment",
-            })
-        # Покупатель в чеке: email обязателен, телефон — в формате только цифр (E.164)
-        receipt_customer = {"email": email}
-        phone_digits = re.sub(r'\D', '', phone)
-        if phone_digits:
-            receipt_customer["phone"] = phone_digits
-
+        raw_key = request.headers.get('Idempotency-Key')
         try:
-            payment = Payment.create({
-                "amount": {
-                    "value": str(total_amount),
-                    "currency": "RUB"
-                },
-                "confirmation": {
-                    "type": "redirect",
-                    "return_url": "https://fishkids.ru/order-success"
-                },
-                "capture": True,
-                "description": f"Заказ №{order.id} от {request.user.email}",
-                "receipt": {
-                    "customer": receipt_customer,
-                    "items": receipt_items,
-                },
-                "metadata": {
-                    "order_id": order.id
-                }
-            })
-        except Exception:
-            logger.exception("Не удалось создать платёж ЮKassa для заказа %s", order.id)
-            # A timeout may happen after the provider accepted the payment.
-            # Preserve the order for reconciliation instead of losing its items.
-            return Response(
-                {"error": "Не удалось создать платёж. Попробуйте позже."},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        # 4. Сохраняем payment_id в заказ
-        order.payment_id = payment.id
-        order.save(update_fields=['payment_id'])
-
-        # Корзина и остатки очищаются/списываются ТОЛЬКО после подтверждения
-        # оплаты в YooKassaWebhookView — чтобы не терять товары при незавершённой оплате.
-
-        # 5. Возвращаем ссылку на оплату
-        return Response({
-            "order_id": order.id,
-            "confirmation_url": payment.confirmation.confirmation_url
-        }, status=status.HTTP_201_CREATED)
+            checkout_key = uuid.UUID(raw_key) if raw_key else uuid.uuid4()
+        except (ValueError, TypeError, AttributeError):
+            raise serializers.ValidationError({'detail': 'Некорректный Idempotency-Key.'})
+        fingerprint = hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+        cart, _ = Cart.objects.get_or_create(user=request.user)
+        with transaction.atomic():
+            # First statement is a write: serializes this cart on PostgreSQL
+            # and obtains SQLite's writer lock before reading the snapshot.
+            Cart.objects.filter(pk=cart.pk).update(created_at=F('created_at'))
+            existing = Order.objects.filter(checkout_key=checkout_key).first()
+            if existing:
+                if existing.user_id != request.user.pk or existing.checkout_fingerprint != fingerprint:
+                    return Response({'error': 'Ключ уже использован для другого оформления.'}, status=409)
+                order = existing
+                created = False
+            else:
+                pending = Order.objects.filter(user=request.user, status='pending', stock_reserved=True).first()
+                if pending:
+                    return Response({'error': 'У вас уже есть неоплаченный заказ. Продолжите его оплату.',
+                                     'order_id': pending.pk}, status=409)
+                cart_items = list(cart.items.select_related('product').order_by('product_id'))
+                if not cart_items:
+                    return Response({'error': 'Корзина пуста'}, status=400)
+                reserve_items(cart_items)
+                items_total = sum(item.product.price * item.quantity for item in cart_items)
+                delivery_cost = Decimal('0')
+                if data['delivery_method'] == 'delivery' and items_total < Decimal('10000'):
+                    delivery_cost = Decimal('3000') if data['beyond_mkad'] else Decimal('1500')
+                order = Order.objects.create(
+                    user=request.user, status='pending', checkout_key=checkout_key,
+                    checkout_fingerprint=fingerprint, payment_key=uuid.uuid4(),
+                    payment_started_at=timezone.now(), stock_reserved=True,
+                    delivery_method=data['delivery_method'], beyond_mkad=data['beyond_mkad'], delivery_cost=delivery_cost,
+                    total_amount=(items_total + delivery_cost).quantize(Decimal('0.01')),
+                    **{name: data[name] for name in ['email','phone','city','street','house','apartment','postal_code','offer_accepted']})
+                OrderItem.objects.bulk_create([
+                    OrderItem(order=order, product=item.product, product_name=item.product.name,
+                              price=item.product.price, quantity=item.quantity) for item in cart_items])
+                receipt_items = [{
+                    'description': item.product.name[:128], 'quantity': str(item.quantity),
+                    'amount': {'value': str(item.product.price), 'currency': 'RUB'},
+                    'vat_code': settings.YOOKASSA_VAT_CODE, 'payment_subject': 'commodity',
+                    'payment_mode': 'full_payment'} for item in cart_items]
+                if delivery_cost:
+                    receipt_items.append({'description': 'Доставка', 'quantity': '1',
+                        'amount': {'value': str(delivery_cost), 'currency': 'RUB'},
+                        'vat_code': settings.YOOKASSA_VAT_CODE, 'payment_subject': 'service',
+                        'payment_mode': 'full_payment'})
+                customer = {'email': data['email'], 'phone': re.sub(r'\D', '', data['phone'])}
+                order.payment_request = {
+                    'amount': {'value': str(order.total_amount), 'currency': 'RUB'},
+                    'confirmation': {'type': 'redirect', 'return_url': settings.FRONTEND_URL + '/order-success'},
+                    'capture': True, 'description': f'Заказ №{order.pk}',
+                    'receipt': {'customer': customer, 'items': receipt_items},
+                    'metadata': {'order_id': str(order.pk), 'source': 'fishkids-shop', 'checkout_key': str(order.checkout_key)}}
+                order.save(update_fields=['payment_request'])
+                record_consent(request.user, 'checkout', data.get('privacy_consent'), order.pk)
+                created = True
+        return self.payment_response(order, created)
