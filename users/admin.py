@@ -43,3 +43,22 @@ class CustomUserAdmin(UserAdmin, ModelAdmin):
     change_password_form = AdminPasswordChangeForm
 
 admin.site.register(CustomUser, CustomUserAdmin)
+
+
+from users.models import LegalConsent
+
+
+@admin.register(LegalConsent)
+class LegalConsentAdmin(ModelAdmin):
+    list_display = ('user', 'purpose', 'document_version', 'accepted_at')
+    list_filter = ('purpose', 'document_version')
+    readonly_fields = ('user', 'purpose', 'object_id', 'document_version', 'document_sha256', 'document_snapshot', 'accepted_at')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

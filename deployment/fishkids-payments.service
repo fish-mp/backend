@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile FishKids payments with YooKassa
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/flock -n -E 0 /run/lock/fishkids-deploy.lock /usr/bin/docker exec deploy_backend_1 python manage.py reconcile_payments --limit 50
+TimeoutStartSec=5min

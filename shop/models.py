@@ -55,7 +55,7 @@ class Product(models.Model):
     short_description = models.CharField(max_length=255, blank=True, verbose_name="Краткое описание")
     description = models.TextField(blank=True, verbose_name="Полное описание")
     
-    stock_quantity = models.PositiveIntegerField(default=0, verbose_name="Количество на складе")
+    stock_quantity = models.PositiveIntegerField(default=0, verbose_name="Доступно к продаже (без резерва)")
     is_in_stock = models.BooleanField(default=True, verbose_name="В наличии")
     is_available = models.BooleanField(default=True, verbose_name="Доступен для заказа (Активен)")
     
@@ -206,6 +206,19 @@ class Order(models.Model):
     )
     payment_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="ID платежа в ЮKassa")
 
+    delivery_method = models.CharField(max_length=20, choices=[('pickup', 'Самовывоз'), ('delivery', 'Доставка')], blank=True)
+    beyond_mkad = models.BooleanField(default=False)
+    delivery_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    checkout_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    checkout_fingerprint = models.CharField(max_length=64, blank=True, editable=False)
+    payment_key = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    payment_request = models.JSONField(default=dict, blank=True, editable=False)
+    payment_started_at = models.DateTimeField(null=True, blank=True, editable=False)
+    payment_last_checked_at = models.DateTimeField(null=True, blank=True, editable=False)
+    confirmation_url = models.URLField(max_length=2048, blank=True, editable=False)
+    stock_reserved = models.BooleanField(default=False, editable=False, verbose_name="Товар зарезервирован")
+    payment_review_required = models.BooleanField(default=False, editable=False, verbose_name="Требует сверки")
+
     # Контактные данные и адрес доставки, заполняются при оформлении заказа
     email = models.EmailField(blank=True, verbose_name="Email для чека")
     phone = models.CharField(max_length=20, blank=True, verbose_name="Телефон")
@@ -219,6 +232,9 @@ class Order(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Дата создания")
 
     class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['payment_id'], condition=models.Q(payment_id__isnull=False) & ~models.Q(payment_id=''), name='unique_provider_payment'),
+        ]
         verbose_name = "Заказ"
         verbose_name_plural = "Заказы"
 
@@ -240,6 +256,7 @@ class OrderItem(models.Model):
         verbose_name="Цена на момент покупки"
     )
     quantity = models.PositiveIntegerField(default=1, verbose_name="Количество")
+    product_name = models.CharField(max_length=255, blank=True, verbose_name="Название при заказе")
 
     class Meta:
         verbose_name = "Товар в заказе"

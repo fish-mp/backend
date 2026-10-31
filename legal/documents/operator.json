@@ -1,0 +1,14 @@
+{
+  "status": "draft",
+  "name": "{{ПОЛНОЕ_НАИМЕНОВАНИЕ_ОПЕРАТОРА}}",
+  "legal_address": "{{ЮРИДИЧЕСКИЙ_АДРЕС}}",
+  "inn": "{{ИНН}}",
+  "ogrn": "{{ОГРН_ИЛИ_ОГРНИП}}",
+  "contact_email": "{{ПОЧТА_ПО_ПЕРСОНАЛЬНЫМ_ДАННЫМ}}",
+  "data_location": "{{ХОСТЕР_И_МЕСТО_БАЗЫ_В_РОССИИ}}",
+  "consent_purposes": [
+    "registration",
+    "checkout",
+    "enrollment"
+  ]
+}

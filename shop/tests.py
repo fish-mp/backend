@@ -107,7 +107,7 @@ class ShopAPITestCase(APITestCase):
         CartItem.objects.create(cart=cart, product=self.product, quantity=2)
 
         url = reverse("orders-list")
-        create_payment.return_value = SimpleNamespace(id='test-payment', confirmation=SimpleNamespace(confirmation_url='https://example.com/pay'))
+        create_payment.side_effect = lambda params, key: SimpleNamespace(id='test-payment', status='pending', amount=SimpleNamespace(**params['amount']), metadata=params['metadata'], confirmation=SimpleNamespace(confirmation_url='https://example.com/pay'))
         response = self.client.post(url, {'email': self.user.email, 'phone': '+79991234567', 'offer_accepted': True}, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -135,7 +135,7 @@ class ShopAPITestCase(APITestCase):
         Cart.objects.create(user=self.user)  # Пустая корзина
 
         url = reverse("orders-list")
-        response = self.client.post(url)
+        response = self.client.post(url, {'email': self.user.email, 'phone': '+79991234567', 'offer_accepted': True}, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response.data["error"], "Корзина пуста")

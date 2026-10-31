@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic FishKids payment reconciliation
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=fishkids-payments.service
+
+[Install]
+WantedBy=timers.target

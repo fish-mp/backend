@@ -35,3 +35,19 @@ class CustomUser(AbstractUser):
         verbose_name = "Пользователь"
         verbose_name_plural = "Пользователи"
         constraints = [models.UniqueConstraint(Lower('email'), name='users_email_ci_unique')]
+
+
+
+class LegalConsent(models.Model):
+    user = models.ForeignKey('CustomUser', null=True, on_delete=models.SET_NULL, related_name='legal_consents')
+    purpose = models.CharField(max_length=30, choices=[
+        ('registration', 'Регистрация'), ('checkout', 'Оформление заказа'), ('enrollment', 'Запись на курс')])
+    object_id = models.CharField(max_length=64, blank=True)
+    document_version = models.CharField(max_length=64)
+    document_sha256 = models.CharField(max_length=64)
+    document_snapshot = models.JSONField()
+    accepted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Подтверждение согласия'
+        verbose_name_plural = 'Подтверждения согласий'
